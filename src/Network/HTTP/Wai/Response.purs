@@ -20,7 +20,7 @@ import Node.Path (FilePath)
 import Node.Encoding (Encoding(UTF8))
 import Node.Stream (Readable, end, pipe, write) as ST
 import Node.FS.Aff as FSA
-import Node.FS.Stats (isDirectory)
+import Node.FS.Stats (Stats, isDirectory)
 
 import Network.HTTP.Wai (responseStatus, responseHeaders)
 import Network.HTTP.Wai.Effects (WaiEffects)
@@ -118,16 +118,16 @@ sendRsp nresp ver s hs (RspFile path (Just fpart@(FilePart part)) hm isHead) =
     beg = part.offset
     len = part.byteCount
   in
-    sendRspFile2XX nresp ver s hs' path beg len isHead
+    sendRspFile2XX nresp ver s hs' path beg len isHead Nothing
 sendRsp nresp ver _ hs (RspFile path Nothing hm isHead) = do
   efinfo <- attempt $ getFileInfo path
   case efinfo of
     Left _ ->
       sendRspFile404 nresp ver hs
-    Right finfo ->
+    Right (Tuple stats finfo) ->
       case conditionalRequest finfo hs hm of
         WithoutBody s -> sendRsp nresp ver s hs RspNoBody
-        WithBody s hs' beg len -> sendRspFile2XX nresp ver s hs' path beg len isHead
+        WithBody s hs' beg len -> sendRspFile2XX nresp ver s hs' path beg len isHead (Just stats)
 
 sendRspFile2XX
   :: forall e
@@ -139,26 +139,26 @@ sendRspFile2XX
   -> Int
   -> Int
   -> Boolean
+  -> Maybe Stats
   -> Aff (WaiEffects e) (Tuple (Maybe H.Status) (Maybe Int))
-sendRspFile2XX nresp ver s hs path beg len isHead
-  | isHead    = sendRsp nresp ver s hs RspNoBody
-  | otherwise = do
-      itE <- attempt $ FSA.stat path
-      case itE of
-        Left _ ->
-          sendRspFile404 nresp ver hs
-        Right stats -> do
-          if isDirectory stats
-            then sendRspFile404 nresp ver hs
-            else do
-              liftEff do
-                NH.setStatusCode nresp (H.status2Number s)
-                sendHeaders nresp hs
-              let conn = NH.responseAsStream nresp
-                  end  = max beg (beg + len - 1)
-              rstream <- liftEff $ createReadStreamRange path beg end
-              _ <- liftEff $ ST.pipe rstream conn
-              pure $ Tuple (Just s) (Just len)
+sendRspFile2XX nresp ver s hs path beg len true _ = sendRsp nresp ver s hs RspNoBody
+sendRspFile2XX nresp ver s hs path beg len _ (Just stats) = do
+  if isDirectory stats
+    then sendRspFile404 nresp ver hs
+    else do
+      liftEff do
+        NH.setStatusCode nresp (H.status2Number s)
+        sendHeaders nresp hs
+      let conn = NH.responseAsStream nresp
+          end  = max beg (beg + len - 1)
+      rstream <- liftEff $ createReadStreamRange path beg end
+      _ <- liftEff $ ST.pipe rstream conn
+      pure $ Tuple (Just s) (Just len)
+sendRspFile2XX nresp ver s hs path beg len _ Nothing = do
+  fseither <- attempt $ FSA.stat path
+  case fseither of
+    Left _      -> sendRspFile404 nresp ver hs
+    Right st    -> sendRspFile2XX nresp ver s hs path beg len false (Just st)
 
 sendRspFile404
   :: forall e

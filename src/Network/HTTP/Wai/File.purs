@@ -56,13 +56,13 @@ instance showFileInfo :: Show FileInfo where
     <> show s.date
     <> "\n})"
 
-getFileInfo :: forall eff. FilePath -> Aff (fs :: F.FS | eff) FileInfo
+getFileInfo :: forall eff. FilePath -> Aff (fs :: F.FS | eff) (Tuple Stats FileInfo)
 getFileInfo fp = do
   fs <- F.stat fp
   guard $ isFile fs
   let time = fromDateTime $ modifiedTime fs
       date = formatHTTPDate time
-  pure $ FileInfo
+  pure $ Tuple fs $ FileInfo
     { name: fp
     , size: fileSizeInfo fs
     , time: time
