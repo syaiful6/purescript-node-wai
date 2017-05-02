@@ -1,4 +1,8 @@
-module Network.HTTP.Types.Version where
+module Network.HTTP.Types.Version
+  ( HttpVersion(..)
+  , http09, http10, http11
+  , string2HttpVersion
+  ) where
 
 import Prelude
 

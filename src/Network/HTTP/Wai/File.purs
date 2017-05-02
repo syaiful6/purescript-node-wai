@@ -3,7 +3,6 @@ module Network.HTTP.Wai.File
   , getFileInfo
   , RspFileInfo(..)
   , conditionalRequest
-  , parseByteRanges
   , addContentHeadersForFilePart
   , createReadStreamRange
   ) where
@@ -16,13 +15,12 @@ import Control.Monad.Eff (Eff)
 import Control.MonadZero (guard)
 
 import Data.Enum (fromEnum)
-import Data.Function.Uncurried as FN
+import Data.Function.Uncurried (Fn3, runFn3)
 import Data.Int (fromNumber)
 import Data.List (List(Nil), (:))
 import Data.Maybe (Maybe(..), fromMaybe, fromJust)
 import Data.Tuple (Tuple(..))
 import Data.Map as M
-import Data.String as S
 import Partial.Unsafe (unsafePartial)
 
 import Node.FS.Aff as F
@@ -31,6 +29,7 @@ import Node.Path (FilePath)
 import Node.Stream (Readable())
 
 import Network.HTTP.Types as H
+import Network.HTTP.Types.Header (parseByteRanges)
 import Network.HTTP.Types.Date (HTTPDate, parseHTTPDate, fromDateTime, formatHTTPDate)
 import Network.HTTP.Wai.Header (RequestHeaderKey(..), HeaderMap)
 import Network.HTTP.Wai.Internal (FilePart(..))
@@ -135,28 +134,6 @@ checkRange (H.ByteRangeFrom   beg)     size = Tuple beg (size - 1)
 checkRange (H.ByteRangeFromTo beg end) size = Tuple beg (min (size - 1) end)
 checkRange (H.ByteRangeSuffix count)   size = Tuple (max 0 (size - count)) (size - 1)
 
-parseByteRanges :: String -> Maybe (List H.ByteRange)
-parseByteRanges bs1 = do
-  bs2 <- S.stripPrefix (S.Pattern "bytes=") bs1
-  Tuple r bs3 <- range bs2
-  ranges ((:) r) bs3
-  where
-    range bs2 = do
-      Tuple i bs3 <- readInteger bs2
-      if i < 0
-        then Just $ Tuple (H.ByteRangeSuffix (negate i)) bs3
-        else do
-          bs4 <- S.stripPrefix (S.Pattern "-") bs3
-          case readInteger bs4 of
-            Just (Tuple j bs5) | j >= i -> Just $ Tuple (H.ByteRangeFromTo i j) bs5
-            _ -> Just $ Tuple (H.ByteRangeFrom i) bs4
-    ranges front bs3
-      | bs3 == "" = Just (front Nil)
-      | otherwise = do
-          bs4 <- S.stripPrefix (S.Pattern ",") bs3
-          Tuple r bs5 <- range bs4
-          ranges (front <<< ((:) r)) bs5
-
 contentRangeHeader :: Int -> Int -> Int -> H.Header
 contentRangeHeader beg end total = H.contentRange byterange
   where
@@ -185,17 +162,6 @@ createReadStreamRange
   -> Int
   -> Int
   -> Eff (fs :: F.FS | eff) (Readable () (fs :: F.FS | eff))
-createReadStreamRange path start end = FN.runFn3 createReadStreamRangeImpl path start end
+createReadStreamRange path start end = runFn3 createReadStreamRangeImpl path start end
 
-readInteger :: String -> Maybe (Tuple Int String)
-readInteger st = FN.runFn4 readIntegerImpl Nothing Just Tuple st
-
-foreign import readIntegerImpl
-  :: FN.Fn4
-      (forall a. Maybe a)
-      (forall a. a -> Maybe a)
-      (forall a b. a -> b -> Tuple a b)
-      String
-      (Maybe (Tuple Int String))
-
-foreign import createReadStreamRangeImpl :: forall eff. FN.Fn3 FilePath Int Int (Eff (fs :: F.FS | eff) (Readable () (fs :: F.FS | eff)))
+foreign import createReadStreamRangeImpl :: forall eff. Fn3 FilePath Int Int (Eff (fs :: F.FS | eff) (Readable () (fs :: F.FS | eff)))
