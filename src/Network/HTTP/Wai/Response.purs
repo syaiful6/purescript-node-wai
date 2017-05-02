@@ -103,7 +103,7 @@ sendRsp nresp ver s hs (RspStream streaRead) = do
   pipst <- attempt $ pipeStreamAff streaRead pipedTo
   case pipst of
     Left err ->
-      sendServerError505 nresp ver hs err
+      sendServerError500 nresp ver hs err
     Right _ -> do
       liftEff $ ST.end pipedTo (pure unit)
       pure $ Tuple (Just s) Nothing
@@ -162,7 +162,7 @@ sendRspFile2XX nresp ver s hs path beg len _ (Just stats) = do
       pips <- attempt $ pipeStreamAff rstream conn
       case pips of
         Left err ->
-          sendServerError505 nresp ver hs err
+          sendServerError500 nresp ver hs err
         Right _ -> do
           liftEff $ ST.end conn (pure unit)
           pure $ Tuple (Just s) (Just len)
@@ -185,16 +185,16 @@ sendRspFile404 nresp ver hd = do
     body = "File not found\n"
     hd'  = replaceHeader H.ContentType "text/plain; charset=utf-8" hd
 
-sendServerError505
+sendServerError500
   :: forall e
    . NH.Response
   -> H.HttpVersion
   -> H.ResponseHeaders
   -> Error
   -> Aff (WaiEffects e) (Tuple (Maybe H.Status) (Maybe Int))
-sendServerError505 nresp ver hd _ = do
+sendServerError500 nresp ver hd _ = do
   liftEff $ clearHeaders nresp
-  sendRsp nresp ver H.status505 hd' (RspString UTF8 body)
+  sendRsp nresp ver H.status500 hd' (RspString UTF8 body)
   where
     body = "Internal Server error"
     hd'  = replaceHeader H.ContentType "text/plain; charset=utf-8" hd

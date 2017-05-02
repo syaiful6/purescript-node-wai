@@ -1,21 +1,11 @@
-module Network.HTTP.Types.Header
-  ( HeaderName(..)
-  , Header(..), getHeaderName, getHeaderValue
-  , ResponseHeaders, RequestHeaders
-  , string2Head, fromHeaders, header2Tuple, ci2Head, lookupHeader
-  , accept, acceptCharset, acceptEncoding, acceptLanguage, allow, authorization, cacheControl
-  , connection, contentEncoding, contentLanguage, contentLength, contentLocation, contentMD5
-  , contentRange, contentType, date, expect, userAgent, lastModified, customString
-  , ByteRange(..)
-  , ByteRanges
-  , renderByteRanges
-  , renderByteRange
-  ) where
+module Network.HTTP.Types.Header where
 
 import Prelude
 
 import Data.Bifunctor (lmap)
 import Data.Foldable (class Foldable, foldMap, intercalate)
+import Data.Function.Uncurried (Fn4, runFn4)
+import Data.List (List(Nil), (:))
 import Data.Maybe (Maybe(..))
 import Data.Maybe.First (First(..))
 import Data.Newtype (unwrap)
@@ -30,6 +20,7 @@ data HeaderName
   | Allow
   | Authorization
   | CacheControl
+  | Cookie
   | Connection
   | ContentEncoding
   | ContentLanguage
@@ -54,6 +45,7 @@ data HeaderName
   | ProxyAuthorization
   | Range
   | Referer
+  | SetCookie
   | TE
   | Trailer
   | TransferEncoding
@@ -90,6 +82,7 @@ instance showHeaderName :: Show HeaderName where
   show Allow              = "Allow"
   show Authorization      = "Authorization"
   show CacheControl       = "Cache-Control"
+  show Cookie             = "Cookie"
   show Connection         = "Connection"
   show ContentEncoding    = "Content-Encoding"
   show ContentLanguage    = "Content-Language"
@@ -114,7 +107,8 @@ instance showHeaderName :: Show HeaderName where
   show ProxyAuthorization = "Proxy-Authorization"
   show Range              = "Range"
   show Referer            = "Referer"
-  show TE                 = "Te"
+  show SetCookie          = "Set-Cookie"
+  show TE                 = "TE"
   show Trailer            = "Trailer"
   show TransferEncoding   = "Transfer-Encoding"
   show Upgrade            = "Upgrade"
@@ -134,9 +128,11 @@ getHeaderValue (Header _ s) = s
 
 -- | Build HeaderName by case insensivetive string, this format used by Node js
 ci2Head :: String -> HeaderName
-ci2Head = string2Head <<< intercalate "-" <<< map toTitleCase <<< S.split (S.Pattern "-")
-  where
-    toTitleCase s = (S.toUpper (S.take 1 s)) <> (S.toLower (S.drop 1 s))
+ci2Head s
+  | S.toLower s == "te" = TE
+  | otherwise           =
+      let toTitleCase st = (S.toUpper (S.take 1 st)) <> (S.toLower (S.drop 1 st))
+      in string2Head $ intercalate "-" (map toTitleCase (S.split (S.Pattern "-") s))
 
 tuple2Header :: Tuple HeaderName String -> Header
 tuple2Header (Tuple n v) = Header n v
@@ -155,6 +151,7 @@ string2Head "Accept-Language"     = AcceptLanguage
 string2Head "Allow"               = Allow
 string2Head "Authorization"       = Authorization
 string2Head "Cache-Control"       = CacheControl
+string2Head "Cookie"              = Cookie
 string2Head "Connection"          = Connection
 string2Head "Content-Encoding"    = ContentEncoding
 string2Head "Content-Language"    = ContentLanguage
@@ -179,7 +176,8 @@ string2Head "Pragma"              = Pragma
 string2Head "Proxy-Authorization" = ProxyAuthorization
 string2Head "Range"               = Range
 string2Head "Referer"             = Referer
-string2Head "Te"                  = TE
+string2Head "Set-Cookie"          = SetCookie
+string2Head "TE"                  = TE
 string2Head "Trailer"             = Trailer
 string2Head "Transfer-Encoding"   = TransferEncoding
 string2Head "Upgrade"             = Upgrade
@@ -208,6 +206,9 @@ authorization = Header Authorization
 
 cacheControl :: String -> Header
 cacheControl = Header CacheControl
+
+cookie :: String -> Header
+cookie = Header Cookie
 
 connection :: String -> Header
 connection = Header Connection
@@ -281,6 +282,9 @@ range = Header Range
 referer :: String -> Header
 referer = Header Referer
 
+setCookie :: String -> Header
+setCookie = Header SetCookie
+
 tE :: String -> Header
 tE = Header TE
 
@@ -327,3 +331,36 @@ renderByteRange (ByteRangeSuffix suffix) = "-" <> show suffix
 renderByteRanges :: ByteRanges -> String
 renderByteRanges xs = "bytes="
   <> intercalate "," (map renderByteRange xs)
+
+parseByteRanges :: String -> Maybe (List ByteRange)
+parseByteRanges bs1 = do
+  bs2 <- S.stripPrefix (S.Pattern "bytes=") bs1
+  Tuple r bs3 <- range bs2
+  ranges ((:) r) bs3
+  where
+    range bs2 = do
+      Tuple i bs3 <- readInteger bs2
+      if i < 0
+        then Just $ Tuple (ByteRangeSuffix (negate i)) bs3
+        else do
+          bs4 <- S.stripPrefix (S.Pattern "-") bs3
+          case readInteger bs4 of
+            Just (Tuple j bs5) | j >= i -> Just $ Tuple (ByteRangeFromTo i j) bs5
+            _ -> Just $ Tuple (ByteRangeFrom i) bs4
+    ranges front bs3
+      | bs3 == "" = Just (front Nil)
+      | otherwise = do
+          bs4 <- S.stripPrefix (S.Pattern ",") bs3
+          Tuple r bs5 <- range bs4
+          ranges (front <<< ((:) r)) bs5
+
+readInteger :: String -> Maybe (Tuple Int String)
+readInteger st = runFn4 readIntegerImpl Nothing Just Tuple st
+
+foreign import readIntegerImpl
+  :: Fn4
+      (forall a. Maybe a)
+      (forall a. a -> Maybe a)
+      (forall a b. a -> b -> Tuple a b)
+      String
+      (Maybe (Tuple Int String))
