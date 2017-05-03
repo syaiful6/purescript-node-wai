@@ -55,6 +55,9 @@ data Response eff
   | ResponseBuffer H.Status H.ResponseHeaders Buffer
   | ResponseString H.Status H.ResponseHeaders Encoding String
 
+
+type RawBody eff = (Buffer -> Eff eff Unit) -> Eff eff Unit -> Aff eff Unit
+
 type FilePath = String
 
 newtype FilePart = FilePart

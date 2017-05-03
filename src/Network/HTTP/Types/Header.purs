@@ -17,6 +17,7 @@ data HeaderName
   | AcceptCharset
   | AcceptEncoding
   | AcceptLanguage
+  | AcceptRanges
   | Allow
   | Authorization
   | CacheControl
@@ -79,6 +80,7 @@ instance showHeaderName :: Show HeaderName where
   show AcceptCharset      = "Accept-Charset"
   show AcceptEncoding     = "Accept-Encoding"
   show AcceptLanguage     = "Accept-Language"
+  show AcceptRanges       = "AcceptRanges"
   show Allow              = "Allow"
   show Authorization      = "Authorization"
   show CacheControl       = "Cache-Control"
@@ -148,6 +150,7 @@ string2Head "Accept"              = Accept
 string2Head "Accept-Charset"      = AcceptCharset
 string2Head "Accept-Encoding"     = AcceptEncoding
 string2Head "Accept-Language"     = AcceptLanguage
+string2Head "Accept-Ranges"       = AcceptRanges
 string2Head "Allow"               = Allow
 string2Head "Authorization"       = Authorization
 string2Head "Cache-Control"       = CacheControl
@@ -197,6 +200,9 @@ acceptEncoding = Header AcceptEncoding
 
 acceptLanguage :: String -> Header
 acceptLanguage = Header AcceptLanguage
+
+acceptRanges :: String -> Header
+acceptRanges = Header AcceptRanges
 
 allow :: String -> Header
 allow = Header Allow

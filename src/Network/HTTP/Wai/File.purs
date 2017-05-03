@@ -18,7 +18,7 @@ import Data.Enum (fromEnum)
 import Data.Function.Uncurried (Fn3, runFn3)
 import Data.Int (fromNumber)
 import Data.List (List(Nil), (:))
-import Data.Maybe (Maybe(..), fromMaybe, fromJust)
+import Data.Maybe (Maybe(..), fromMaybe', fromJust)
 import Data.Tuple (Tuple(..))
 import Data.Map as M
 import Partial.Unsafe (unsafePartial)
@@ -87,7 +87,7 @@ conditionalRequest (FileInfo finfo) hs0 hm = case condition of
     mcondition = ifmodified hm finfo.size finfo.time
       <|> ifunmodified hm finfo.size finfo.time
       <|> ifrange hm finfo.size finfo.time
-    condition = fromMaybe (unconditional hm finfo.size) mcondition
+    condition = fromMaybe' (\_-> unconditional hm finfo.size) mcondition
 
 ifModifiedSince :: HeaderMap -> Maybe HTTPDate
 ifModifiedSince hm = M.lookup (fromEnum ReqIfModifiedSince) hm >>= parseHTTPDate
