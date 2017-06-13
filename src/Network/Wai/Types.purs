@@ -1,8 +1,9 @@
 module Network.Wai.Types
-  ( module Network.HTTP.Types.Header
-  , module Network.HTTP.Types.Method
-  , module Network.HTTP.Types.Status
-  , module Network.HTTP.Types.Version
+  ( module Network.Wai.Types.Header
+  , module Network.Wai.Types.Method
+  , module Network.Wai.Types.Status
+  , module Network.Wai.Types.Version
+  , module Network.Wai.Types.URI
   ) where
 
 import Network.Wai.Types.Header
@@ -38,3 +39,4 @@ import Network.Wai.Types.Status
   , httpVersionNotSupported505, statusIsInformational, statusIsSuccessful, statusIsRedirection
   , statusIsClientError, statusIsServerError)
 import Network.Wai.Types.Version (HttpVersion(..), string2HttpVersion, http09, http10, http11)
+import Network.Wai.Types.URI (QueryItem, Query, parseQuery)

@@ -65,22 +65,25 @@ module Network.Wai.Types.Header
 import Prelude
 
 import Data.Foldable (class Foldable, intercalate)
+import Data.List (List(..), (:))
 import Data.Maybe (Maybe(..))
-import Data.newtype (wrap)
+import Data.String as S
 import Data.String.CaseInsensitive (CaseInsensitiveString(..))
 import Data.Tuple (Tuple(..))
+import Data.Function.Uncurried (Fn4, runFn4)
+
 
 -- | Header name
-type HeaderName = CaseInsensitive
+type HeaderName = CaseInsensitiveString
 
 -- | Header
 type Header = Tuple HeaderName String
 
 -- RequestHeaders
-type RequestHeaders  = Array Header
+type RequestHeaders  = List Header
 
 -- ResponseHeaders
-type ResponseHeaders =  Array Header
+type ResponseHeaders =  List Header
 
 -- | HTTP Header names according to http://www.w3.org/Protocols/rfc2616/rfc2616-sec14.html
 hAccept :: HeaderName
@@ -180,15 +183,15 @@ hWarning = CaseInsensitiveString "Warning"
 
 -- | HTTP Header names according to http://www.w3.org/Protocols/rfc2616/rfc2616-sec19.html
 hContentDisposition :: HeaderName
-hContentDisposition = "Content-Disposition"
+hContentDisposition = CaseInsensitiveString "Content-Disposition"
 hMIMEVersion :: HeaderName
-hMIMEVersion = "MIME-Version"
+hMIMEVersion = CaseInsensitiveString "MIME-Version"
 
 -- | HTTP Header names according to https://tools.ietf.org/html/rfc6265#section-4
 hCookie :: HeaderName
-hCookie = "Cookie"
+hCookie = CaseInsensitiveString "Cookie"
 hSetCookie :: HeaderName
-hSetCookie = "Set-Cookie"
+hSetCookie = CaseInsensitiveString "Set-Cookie"
 
 data ByteRange
   = ByteRangeFrom Int
