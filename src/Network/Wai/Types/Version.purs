@@ -1,4 +1,4 @@
-module Network.HTTP.Types.Version
+module Network.Wai.Types.Version
   ( HttpVersion(..)
   , http09, http10, http11
   , string2HttpVersion

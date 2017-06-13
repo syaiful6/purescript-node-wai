@@ -1,4 +1,4 @@
-module Network.HTTP.Types.Date
+module Network.Wai.Types.Date
   ( HTTPDate
   , unHTTPDate
   , fromDateTime

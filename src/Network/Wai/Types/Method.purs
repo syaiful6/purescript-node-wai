@@ -1,4 +1,4 @@
-module Network.HTTP.Types.Method
+module Network.Wai.Types.Method
   ( Method(..)
   , string2HTTPMethod
   )where

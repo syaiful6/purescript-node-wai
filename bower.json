@@ -1,5 +1,5 @@
 {
-  "name": "bookie",
+  "name": "purescript-node-wai",
   "ignore": [
     "**/.*",
     "node_modules",
@@ -24,9 +24,10 @@
     "purescript-node-http": "^4.0.0",
     "purescript-parsing": "^4.2.0",
     "purescript-strings": "^3.1.0",
-    "purescript-uri": "^3.0.1",
     "purescript-transformers": "^3.2.0",
-    "purescript-unfoldable": "^3.0.0"
+    "purescript-unfoldable": "^3.0.0",
+    "purescript-strex": "git://github.com/julienchan/purescript-strex.git#e9d424d",
+    "purescript-node-strex": "git://github.com/julienchan/purescript-node-strex.git#c6e1e79"
   },
   "devDependencies": {
     "purescript-test-unit": "^11.0.0",
