@@ -5,14 +5,14 @@ import Prelude
 import Control.Monad.Aff (Aff, delay)
 import Control.Monad.Aff.AVar as AV
 import Control.Monad.Eff.Class (liftEff)
-import Control.Monad.Eff.Ref (Ref, newRef, modifyRef, writeRef, readRef)
+import Control.Monad.Eff.Ref (newRef, writeRef, readRef)
+import Control.Monad.Error.Class (throwError)
+import Control.Monad.STM as S
 
 import Data.ByteString as B
 import Data.ByteString.Node.Stream (Readable, onData, onEnd, onError)
-import Data.CatQueue as Q
 import Data.Maybe (Maybe(..))
 import Data.Newtype (wrap)
-import Data.Tuple (Tuple(..))
 
 import Network.Wai.Handler.Node.Utils (withAVar, handleAff)
 import Network.Wai.Handler.Node.Effects (WaiEffects)
@@ -22,18 +22,32 @@ data Entry a
   = Entry a
   | EOF
 
-data BodySource =
-  BodySource
-    (AV.AVar Unit)
-    (Ref Boolean)
-    (Ref (Q.CatQueue (Entry B.ByteString)))
+data BodySource = BodySource (S.TVar Int) (S.TVar Boolean) (S.TQueue (Entry B.ByteString))
 
-mkBodySource :: forall eff. Aff (WaiEffects eff) BodySource
-mkBodySource = do
-  v <- AV.makeVar' unit
-  ref <- liftEff $ newRef Q.empty
-  csm <- liftEff $ newRef false
-  pure $ BodySource v csm ref
+mkBodySource :: forall eff. Int -> Aff (WaiEffects eff) BodySource
+mkBodySource size = BodySource <$> S.newTVarAff size <*> S.newTVarAff false <*> S.newTQueueAff
+
+recvBody :: BodySource -> Entry B.ByteString -> S.STM Unit
+recvBody (BodySource _ _ queue) EOF = S.writeTQueue queue EOF
+recvBody (BodySource size _ queue) er@(Entry bs) = do
+  let len = B.length bs
+  size' <- S.readTVar size
+  if (size' - len) <= 0
+    then S.retry
+    else do
+      _ <- S.writeTVar size (size' - len)
+      S.writeTQueue queue er
+
+readBodySource :: BodySource -> S.STM (Entry B.ByteString)
+readBodySource (BodySource size _ queue) = do
+  s <- S.readTVar size
+  i <- S.readTQueue queue
+  case i of
+    EOF -> pure i
+    Entry bs -> do
+      let len = B.length bs
+      S.writeTVar size (s + len)
+      pure i
 
 flushBody :: forall eff. Aff (WaiEffects eff) B.ByteString -> Aff (WaiEffects eff) Unit
 flushBody src = go
@@ -51,47 +65,45 @@ readBody
    . Readable w (WaiEffects eff)
   -> BodySource
   -> Aff (WaiEffects eff) (Aff (WaiEffects eff) B.ByteString)
-readBody s (BodySource lock started ref) = do
-  eof     <- liftEff $ newRef false
+readBody s bso@(BodySource _ started _) = do
+  eof      <- liftEff $ newRef false
+  errorRef <- liftEff $ newRef Nothing
+  lock <- AV.makeVar' unit
   pure $ do
-    isStarted <- liftEff $ readRef started
+    isStarted <- S.atomically $ S.readTVar started
     if isStarted
-      then read eof
+      then read lock errorRef eof
       else do
-        _ <- liftEff do
-          _ <- start eof
-          writeRef started true
-        read eof
+        _ <- liftEff $ start lock errorRef
+        _ <- S.atomically $ S.writeTVar started true
+        read lock errorRef eof
   where
-  start eof = do
+  start lock errorRef = do
     _ <- onData s (handleAff <<< handleData)
     _ <- onEnd s (handleAff handleEnd)
-    onError s (handleAff <<< handleError eof)
+    onError s (handleAff <<< handleError lock errorRef)
 
-  read eof = withAVar lock \_ -> do
-    isEof <- liftEff $ readRef eof
-    if isEof
-      then pure B.empty
-      else do
-        v <- liftEff $ readRef ref
-        case Q.uncons v of
-          Nothing -> do
-            _ <- delay (wrap 1000.00)
-            read eof
-          Just (Tuple (Entry a) qs) -> do
-            _ <- liftEff $ writeRef ref qs
-            pure a
-          Just (Tuple EOF _) -> do
-            _ <- liftEff $ writeRef ref Q.empty
-            pure B.empty
+  read lock errorRef eof = withAVar lock \_ -> do
+    me <- liftEff $ readRef errorRef
+    case me of
+      Just err -> throwError err
+      Nothing -> do
+        isEof <- liftEff $ readRef eof
+        if isEof
+          then pure B.empty
+          else do
+            v <- S.atomically (readBodySource bso)
+            case v of
+              Entry a -> pure a
+              EOF     -> do
+                _ <- liftEff $ writeRef eof true
+                pure B.empty
 
-  handleError eof err = withAVar lock \_ ->
-    liftEff $ writeRef eof true
+  handleError lock errorRef err = withAVar lock \_ -> liftEff $ writeRef errorRef (Just err)
 
-  handleEnd = withAVar lock \_ ->
-    liftEff (modifyRef ref (\sq -> Q.snoc sq EOF))
+  handleEnd = S.atomically (recvBody bso EOF)
 
-  handleData bs = withAVar lock \_ ->
+  handleData bs =
     if B.null bs
       then pure unit
-      else liftEff (modifyRef ref (\sq -> Q.snoc sq (Entry bs)))
+      else S.atomically (recvBody bso (Entry bs))
