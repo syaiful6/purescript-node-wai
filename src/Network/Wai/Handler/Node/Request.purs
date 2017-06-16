@@ -10,7 +10,7 @@ import Control.Monad.Error.Class (throwError)
 import Control.Monad.STM as S
 
 import Data.ByteString as B
-import Data.ByteString.Node.Stream (Readable, onData, onEnd, onError)
+import Data.ByteString.Node.Stream (Readable, onData, onEnd, onError, pause, resume, isPaused)
 import Data.Maybe (Maybe(..))
 import Data.Newtype (wrap)
 
@@ -22,24 +22,29 @@ data Entry a
   = Entry a
   | EOF
 
-data BodySource = BodySource (S.TVar Int) (S.TVar Boolean) (S.TQueue (Entry B.ByteString))
+data BodySource = BodySource (S.TVar Int) (S.TQueue (Entry B.ByteString))
 
 mkBodySource :: forall eff. Int -> Aff (WaiEffects eff) BodySource
-mkBodySource size = BodySource <$> S.newTVarAff size <*> S.newTVarAff false <*> S.newTQueueAff
+mkBodySource size = BodySource <$> S.newTVarAff size <*> S.newTQueueAff
 
-recvBody :: BodySource -> Entry B.ByteString -> S.STM Unit
-recvBody (BodySource _ _ queue) EOF = S.writeTQueue queue EOF
-recvBody (BodySource size _ queue) er@(Entry bs) = do
-  let len = B.length bs
+recvBody :: BodySource -> Entry B.ByteString -> S.STM Boolean
+recvBody (BodySource _ queue) EOF = S.writeTQueue queue EOF
+recvBody (BodySource size queue) er@(Entry bs) = do
   size' <- S.readTVar size
-  if (size' - len) <= 0
-    then S.retry
-    else do
-      _ <- S.writeTVar size (size' - len)
-      S.writeTQueue queue er
+  let rem = size' - (B.length bs)
+  _ <- S.writeTVar size rem
+  _ <- S.writeTQueue queue er
+  if rem <= 0
+    then pure true
+    else pure false
+
+isBodySourceFull :: BodySource -> S.STM Boolean
+isBodySourceFull (BodySource size _) = do
+  v <- S.readTVar size
+  pure $ if v <= 0 then true else false
 
 readBodySource :: BodySource -> S.STM (Entry B.ByteString)
-readBodySource (BodySource size _ queue) = do
+readBodySource (BodySource size queue) = do
   s <- S.readTVar size
   i <- S.readTQueue queue
   case i of
@@ -65,17 +70,18 @@ readBody
    . Readable w (WaiEffects eff)
   -> BodySource
   -> Aff (WaiEffects eff) (Aff (WaiEffects eff) B.ByteString)
-readBody s bso@(BodySource _ started _) = do
+readBody s bso = do
   eof      <- liftEff $ newRef false
   errorRef <- liftEff $ newRef Nothing
+  started <- liftEff $ newRef false
   lock <- AV.makeVar' unit
   pure $ do
-    isStarted <- S.atomically $ S.readTVar started
+    isStarted <- liftEff $ readRef started
     if isStarted
       then read lock errorRef eof
       else do
         _ <- liftEff $ start lock errorRef
-        _ <- S.atomically $ S.writeTVar started true
+        _ <- liftEff $ writeRef started true
         read lock errorRef eof
   where
   start lock errorRef = do
@@ -94,16 +100,22 @@ readBody s bso@(BodySource _ started _) = do
           else do
             v <- S.atomically (readBodySource bso)
             case v of
-              Entry a -> pure a
-              EOF     -> do
+              Entry a -> do
+                ps <- liftEff $ isPaused s
+                isFull <- S.atomically (isBodySourceFull bso)
+                when (ps && (not isFull)) (liftEff $ resume s)
+                pure a
+              EOF -> do
                 _ <- liftEff $ writeRef eof true
                 pure B.empty
 
   handleError lock errorRef err = withAVar lock \_ -> liftEff $ writeRef errorRef (Just err)
 
-  handleEnd = S.atomically (recvBody bso EOF)
+  handleEnd = void $ S.atomically (recvBody bso EOF)
 
   handleData bs =
     if B.null bs
       then pure unit
-      else S.atomically (recvBody bso (Entry bs))
+      else do
+        full <- S.atomically (recvBody bso (Entry bs))
+        when full (liftEff $ pause s)
