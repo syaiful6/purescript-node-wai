@@ -7,7 +7,6 @@ import Control.Monad.Eff.Ref (REF)
 import Node.FS (FS)
 import Node.HTTP (HTTP)
 
-
 type WaiEffects eff =
   ( avar :: AVAR
   , exception :: EXCEPTION

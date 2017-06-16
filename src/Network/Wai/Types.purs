@@ -39,4 +39,4 @@ import Network.Wai.Types.Status
   , httpVersionNotSupported505, statusIsInformational, statusIsSuccessful, statusIsRedirection
   , statusIsClientError, statusIsServerError)
 import Network.Wai.Types.Version (HttpVersion(..), string2HttpVersion, http09, http10, http11)
-import Network.Wai.Types.URI (QueryItem, Query, parseQuery)
+import Network.Wai.Types.URI (QueryItem, Query, parseQuery, pathSegments)

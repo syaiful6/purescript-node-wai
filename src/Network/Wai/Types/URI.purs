@@ -2,12 +2,13 @@ module Network.Wai.Types.URI
   ( QueryItem
   , Query
   , parseQuery
+  , pathSegments
   ) where
 
 import Prelude
 
 import Data.Either (fromRight)
-import Data.List (List(Nil), (:), reverse)
+import Data.List (List(Nil), (:), reverse, fromFoldable)
 import Data.Maybe (Maybe(..))
 import Data.Tuple (Tuple(..))
 import Data.String as S
@@ -22,6 +23,14 @@ import Partial.Unsafe (unsafePartial)
 type QueryItem = Tuple String (Maybe String)
 
 type Query = List QueryItem
+
+pathSegments :: String -> List String
+pathSegments ""  = Nil
+pathSegments "/" = Nil
+pathSegments s   = normalizePath $ fromFoldable (S.split (S.Pattern "/") s)
+  where
+  normalizePath ("":xs) = xs
+  normalizePath xs = xs
 
 parseQuery :: String -> Query
 parseQuery = parseQuery' Nil <<< dropQuestion

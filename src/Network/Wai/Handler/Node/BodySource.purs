@@ -1,4 +1,4 @@
-module Network.Wai.Handler.Node.Request where
+module Network.Wai.Handler.Node.BodySource where
 
 import Prelude
 
@@ -28,7 +28,7 @@ mkBodySource :: forall eff. Int -> Aff (WaiEffects eff) BodySource
 mkBodySource size = BodySource <$> S.newTVarAff size <*> S.newTQueueAff
 
 recvBody :: BodySource -> Entry B.ByteString -> S.STM Boolean
-recvBody (BodySource _ queue) EOF = S.writeTQueue queue EOF
+recvBody (BodySource _ queue) EOF = S.writeTQueue queue EOF $> true
 recvBody (BodySource size queue) er@(Entry bs) = do
   size' <- S.readTVar size
   let rem = size' - (B.length bs)
