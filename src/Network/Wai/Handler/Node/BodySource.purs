@@ -4,6 +4,7 @@ import Prelude
 
 import Control.Monad.Aff (Aff, delay)
 import Control.Monad.Aff.AVar as AV
+import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Ref (newRef, writeRef, readRef)
 import Control.Monad.Error.Class (throwError)
@@ -11,12 +12,13 @@ import Control.Monad.STM as S
 
 import Data.ByteString as B
 import Data.ByteString.Node.Stream (Readable, onData, onEnd, onError, pause, resume, isPaused)
-import Data.Maybe (Maybe(..))
+import Data.Maybe (Maybe(..), isJust)
 import Data.Newtype (wrap)
 
-import Network.Wai.Handler.Node.Utils (withAVar, handleAff)
+import Network.Wai.Handler.Node.Utils (handleAff, nextTickEff)
 import Network.Wai.Handler.Node.Effects (WaiEffects)
 
+import Unsafe.Coerce (unsafeCoerce)
 
 data Entry a
   = Entry a
@@ -24,19 +26,20 @@ data Entry a
 
 data BodySource = BodySource (S.TVar Int) (S.TQueue (Entry B.ByteString))
 
-mkBodySource :: forall eff. Int -> Aff (WaiEffects eff) BodySource
-mkBodySource size = BodySource <$> S.newTVarAff size <*> S.newTQueueAff
+mkBodySource' :: forall eff. Int -> Aff (WaiEffects eff) BodySource
+mkBodySource' size = BodySource <$> S.newTVarAff size <*> S.newTQueueAff
+
+mkBodySource :: forall eff. Aff (WaiEffects eff) BodySource
+mkBodySource = mkBodySource' (16 * 1024)
 
 recvBody :: BodySource -> Entry B.ByteString -> S.STM Boolean
 recvBody (BodySource _ queue) EOF = S.writeTQueue queue EOF $> true
 recvBody (BodySource size queue) er@(Entry bs) = do
   size' <- S.readTVar size
-  let rem = size' - (B.length bs)
+  let i = size' - (B.length bs)
   _ <- S.writeTVar size rem
   _ <- S.writeTQueue queue er
-  if rem <= 0
-    then pure true
-    else pure false
+  pure $ if i <= 0 then true else false
 
 isBodySourceFull :: BodySource -> S.STM Boolean
 isBodySourceFull (BodySource size _) = do
@@ -45,13 +48,12 @@ isBodySourceFull (BodySource size _) = do
 
 readBodySource :: BodySource -> S.STM (Entry B.ByteString)
 readBodySource (BodySource size queue) = do
-  s <- S.readTVar size
   i <- S.readTQueue queue
   case i of
     EOF -> pure i
     Entry bs -> do
       let len = B.length bs
-      S.writeTVar size (s + len)
+      _ <- S.modifyTVar size ((+) len)
       pure i
 
 flushBody :: forall eff. Aff (WaiEffects eff) B.ByteString -> Aff (WaiEffects eff) Unit
@@ -74,25 +76,26 @@ readBody s bso = do
   eof      <- liftEff $ newRef false
   errorRef <- liftEff $ newRef Nothing
   started <- liftEff $ newRef false
-  lock <- AV.makeVar' unit
   pure $ do
     isStarted <- liftEff $ readRef started
-    if isStarted
-      then read lock errorRef eof
-      else do
-        _ <- liftEff $ start lock errorRef
-        _ <- liftEff $ writeRef started true
-        read lock errorRef eof
+    isFull <- S.atomically $ isBodySourceFull bsp
+    when (not isStarted && not isFull) $ liftEff $ start started errorRef
+    recvB errorRef eof
   where
-  start lock errorRef = do
-    _ <- onData s (handleAff <<< handleData)
+  start startRef errorRef = do
+    _ <- onData s (handleAff <<< handleData startRef)
     _ <- onEnd s (handleAff handleEnd)
-    onError s (handleAff <<< handleError lock errorRef)
+    _ <- onError s (handleError errorRef)
+    p <- isPaused s
+    _ <- when p (resume s)
+    writeRef startRef true
 
-  read lock errorRef eof = withAVar lock \_ -> do
+  recvB errorRef eof = do
     me <- liftEff $ readRef errorRef
     case me of
-      Just err -> throwError err
+      Just err -> do
+        _ <- liftEff $ removeAllListener s
+        throwError err
       Nothing -> do
         isEof <- liftEff $ readRef eof
         if isEof
@@ -100,22 +103,29 @@ readBody s bso = do
           else do
             v <- S.atomically (readBodySource bso)
             case v of
-              Entry a -> do
-                ps <- liftEff $ isPaused s
-                isFull <- S.atomically (isBodySourceFull bso)
-                when (ps && (not isFull)) (liftEff $ resume s)
-                pure a
+              Entry a -> pure a
               EOF -> do
-                _ <- liftEff $ writeRef eof true
+                _ <- liftEff $ do
+                  _ <- writeRef eof true
+                  -- remove our listeners
+                  removeAllListener s
                 pure B.empty
 
-  handleError lock errorRef err = withAVar lock \_ -> liftEff $ writeRef errorRef (Just err)
+  handleError errorRef err = writeRef errorRef (Just err)
 
   handleEnd = void $ S.atomically (recvBody bso EOF)
 
-  handleData bs =
+  handleData started bs =
     if B.null bs
       then pure unit
       else do
         full <- S.atomically (recvBody bso (Entry bs))
-        when full (liftEff $ pause s)
+        when full $ liftEff do
+          _ <- removeAllListener s
+          -- it look like the stream can't be paused by simple using `pause` function.
+          -- It maybe just work when pipe the stream to writable stream. So, we just
+          -- remove all listeners to make the stream in pause mode
+          writeRef started false
+
+foreign import removeAllListener
+  :: forall w eff. Readable w eff -> Eff eff Unit

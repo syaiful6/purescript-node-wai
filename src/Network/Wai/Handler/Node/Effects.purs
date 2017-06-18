@@ -6,12 +6,14 @@ import Control.Monad.Eff.Ref (REF)
 
 import Node.FS (FS)
 import Node.HTTP (HTTP)
+import Node.Process (PROCESS)
 
 type WaiEffects eff =
   ( avar :: AVAR
   , exception :: EXCEPTION
   , fs :: FS
   , http :: HTTP
+  , process :: PROCESS
   , ref :: REF
   | eff
   )

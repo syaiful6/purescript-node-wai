@@ -2,6 +2,8 @@ module Network.Wai.Handler.Node.Types
   ( BufferPool
   , Buffer
   , BufSize
+  , Recv
+  , RecvBuf
   , FileId(..)
   , SendFile
   , Settings(..)
@@ -18,9 +20,11 @@ module Network.Wai.Handler.Node.Types
 import Prelude
 
 import Control.Monad.Aff (Aff)
+import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Ref (Ref)
+import Control.Monad.Eff.Exception (Error)
 
-import Data.ArrayBuffer.TypedArray (Ptr(..), Uint8, arrayBuffer)
+import Data.ArrayBuffer.TypedArray (Ptr, Uint8, arrayBuffer)
 import Data.ByteString (ByteString)
 import Data.List (List)
 import Data.Maybe (Maybe)
@@ -41,6 +45,10 @@ type BufferPool = Ref ByteString
 type Buffer = Ptr Uint8
 
 type BufSize = Int
+
+type Recv eff = Aff eff ByteString
+
+type RecvBuf eff = Buffer -> BufSize -> Aff eff Boolean
 
 newtype FileId = FileId
   { fileIdPath :: FilePath
@@ -96,4 +104,5 @@ newtype Settings eff = Settings
   , fdCacheDuration       :: Number
   , fileInfoCacheDuration :: Number
   , logger                :: Request eff -> H.Status -> Maybe Int -> Aff eff Unit
+  , onException           :: Maybe (Request eff) -> Error -> Eff eff Unit
   }

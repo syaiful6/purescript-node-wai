@@ -25,6 +25,7 @@
     "purescript-maybe": "^3.0.0",
     "purescript-node-fs-aff": "^4.0.0",
     "purescript-node-http": "^4.0.0",
+    "purescript-node-process": "^4.0.0",
     "purescript-node-strex": "git://github.com/julienchan/purescript-node-strex.git#c6e1e79",
     "purescript-strings": "^3.1.0",
     "purescript-string-parsers": "^3.0.0",

@@ -16,7 +16,7 @@ import Data.Map as M
 import Data.Int (fromNumber)
 import Data.Maybe (Maybe(..), fromJust)
 import Data.Newtype (wrap)
-import Data.Tuple (Tuple(..))
+import Data.Tuple (Tuple(..), uncurry)
 
 import Network.Wai.Types.Date (HTTPDate, fromDateTime, formatHTTPDate)
 import Node.FS.Aff as F
@@ -91,7 +91,7 @@ initialize :: forall eff. Number -> Aff (WaiEffects eff) (FileInfoCache (WaiEffe
 initialize dur = mkReaper $ ReaperSetting
   { action: override
   , delay: wrap dur
-  , cons: \(Tuple k v) -> M.insert k v
+  , cons: uncurry M.insert
   , isNull: M.isEmpty
   , empty: M.empty
   }

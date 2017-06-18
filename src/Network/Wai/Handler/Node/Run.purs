@@ -55,7 +55,7 @@ httpConnection resp = do
 
 recvNodeRequest :: forall eff. N.Request -> Aff (WaiEffects eff) (Request (WaiEffects eff))
 recvNodeRequest req = do
-  bs <- mkBodySource 16384
+  bs <- mkBodySource
   source <- readBody (N.requestAsStream req) bs
   pure $ Request
     { method: httpMethod
@@ -139,17 +139,17 @@ sendFileStream
    . BS.Writable r (WaiEffects eff)
   -> Z.SendFile (WaiEffects eff)
 sendFileStream ws (Z.FileId { fileIdPath, fileIdFd }) off len act = case fileIdFd of
-  Nothing -> sendfileWithHeader ws fileIdPath (PartOfFile off len) act
-  Just fd -> sendfileFdWithHeader ws fd (PartOfFile off len) act
+  Nothing -> sendfilePath ws fileIdPath (PartOfFile off len) act
+  Just fd -> sendfileFd ws fd (PartOfFile off len) act
 
-sendfileWithHeader
+sendfilePath
   :: forall r eff
    . BS.Writable r (WaiEffects eff)
   -> FilePath
   -> FileRange
   -> Aff (WaiEffects eff) Unit
   -> Aff (WaiEffects eff) Unit
-sendfileWithHeader ws path frange act = do
+sendfilePath ws path frange act = do
   rs <- liftEff rseff
   _ <- pipeStreamAff rs ws
   act
@@ -159,14 +159,14 @@ sendfileWithHeader ws path frange act = do
       NF.createReadableStreamRangeWith defaultReadStreamOptions start end path
     EntireFile -> createReadStream path
 
-sendfileFdWithHeader
+sendfileFd
   :: forall r eff
    . BS.Writable r (WaiEffects eff)
   -> FileDescriptor
   -> FileRange
   -> Aff (WaiEffects eff) Unit
   -> Aff (WaiEffects eff) Unit
-sendfileFdWithHeader ws fd frange act = do
+sendfileFd ws fd frange act = do
   rs <- liftEff $ rseff
   _ <- pipeStreamAff rs ws
   act
