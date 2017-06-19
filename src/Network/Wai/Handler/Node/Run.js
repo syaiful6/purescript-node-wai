@@ -16,3 +16,9 @@ exports.closeHttpServer = function (nonCanceler, server) {
     return nonCanceler;
   };
 }
+
+exports.onceDrainStream = function (stream, eff) {
+  return function () {
+    stream.once('drain', eff)
+  }
+}

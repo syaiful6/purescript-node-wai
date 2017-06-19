@@ -2,6 +2,7 @@ module Network.Wai.Handler.Node.Header
   ( IndexedHeader
   , RequestHeaderKey(..)
   , indexRequestHeader
+  , defaultIxReqHdrs
   ) where
 
 import Prelude
@@ -74,6 +75,9 @@ instance boundedEnumRequestHeaderKey :: BoundedEnum RequestHeaderKey where
 
 indexRequestHeader :: RequestHeaders -> IndexedHeader
 indexRequestHeader = traverseHeader requestKeyIndex
+
+defaultIxReqHdrs :: IndexedHeader
+defaultIxReqHdrs = IM.empty
 
 requestKeyIndex :: HeaderName -> Maybe Int
 requestKeyIndex bs@(CaseInsensitiveString ix) = case S.length ix of

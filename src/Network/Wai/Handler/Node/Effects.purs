@@ -2,6 +2,7 @@ module Network.Wai.Handler.Node.Effects where
 
 import Control.Monad.Aff.AVar (AVAR)
 import Control.Monad.Eff.Exception (EXCEPTION)
+import Control.Monad.Eff.Console (CONSOLE)
 import Control.Monad.Eff.Ref (REF)
 
 import Node.FS (FS)
@@ -10,6 +11,7 @@ import Node.Process (PROCESS)
 
 type WaiEffects eff =
   ( avar :: AVAR
+  , console :: CONSOLE
   , exception :: EXCEPTION
   , fs :: FS
   , http :: HTTP

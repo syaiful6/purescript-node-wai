@@ -17,23 +17,25 @@ import Prelude
 
 import Control.Monad.Aff (Aff)
 import Control.Monad.Aff.Schedule.Reaper
-  (Reaper, ReaperSetting(..), mkReaper, mkListAction, reaperAdd, reaperStop, reaperKill)
+  (Reaper, ReaperSetting(..), mkReaper, reaperAdd, reaperStop, reaperKill)
 import Control.Monad.Error.Class (catchError)
-import Control.Monad.STM (TVar, newTVarAff, writeTVar, readTVar, atomically)
+import Control.Monad.Eff.Class (liftEff)
+import Control.Monad.Eff.Ref (Ref, newRef, writeRef, readRef)
 
-import Data.List (List(Nil), (:), null)
-import Data.Foldable (traverse_)
+import Data.CatList (CatList, empty, cons, null, snoc)
+import Data.Foldable (traverse_, foldl)
+import Data.Traversable (traverse)
 import Data.Maybe (Maybe(..))
 import Data.Newtype (wrap)
 
 import Network.Wai.Handler.Node.Effects (WaiEffects)
 
 
-type Manager eff = Reaper eff (List (Handle eff)) (Handle eff)
+type Manager eff = Reaper eff (CatList (Handle eff)) (Handle eff)
 
 type TimeoutAction eff = Aff eff Unit
 
-data Handle eff = Handle (TVar (TimeoutAction eff)) (TVar State)
+data Handle eff = Handle (Ref (TimeoutAction eff)) (Ref State)
 
 data State = Active    -- Manager turns it to Inactive.
            | Inactive  -- Manager removes it with timeout action.
@@ -42,21 +44,21 @@ data State = Active    -- Manager turns it to Inactive.
 
 initialize :: forall eff. Number -> Aff (WaiEffects eff) (Manager (WaiEffects eff))
 initialize timeout = mkReaper $ ReaperSetting
-  { action: mkListAction prune
+  { action: mkCatListAction prune
   , delay: wrap timeout
-  , cons: (:)
+  , cons: cons
   , isNull: null
-  , empty: Nil
+  , empty: empty
   }
   where
   prune m@(Handle act st) = do
-    state <- atomically $ do
-      x <- readTVar st
-      writeTVar st (inactivate x)
+    state <- liftEff $ do
+      x <- readRef st
+      writeRef st (inactivate x)
       pure x
     case state of
       Inactive -> do
-        onTimeout <- atomically (readTVar act)
+        onTimeout <- liftEff (readRef act)
         _ <- onTimeout `catchError` \_ -> pure unit
         pure Nothing
       Canceled -> pure Nothing
@@ -69,7 +71,7 @@ stopManager :: forall eff. Manager (WaiEffects eff) -> Aff (WaiEffects eff) Unit
 stopManager rep = reaperStop rep >>= traverse_ fire
   where
   fire (Handle act _) = do
-    onTimeout <- atomically (readTVar act)
+    onTimeout <- liftEff (readRef act)
     onTimeout `catchError` \_ -> pure unit
 
 killManager :: forall eff. Manager (WaiEffects eff) -> Aff (WaiEffects eff) Unit
@@ -81,25 +83,41 @@ register
   -> TimeoutAction (WaiEffects eff)
   -> Aff (WaiEffects eff) (Handle (WaiEffects eff))
 register mgr onTimeout = do
-  act   <- newTVarAff onTimeout
-  state <- newTVarAff Active
+  act   <- liftEff $ newRef onTimeout
+  state <- liftEff $ newRef Active
   let h = Handle act state
   _ <- reaperAdd mgr h
   pure h
 
 tickle :: forall eff. Handle (WaiEffects eff) -> Aff (WaiEffects eff) Unit
-tickle (Handle _ st) = atomically $ writeTVar st Active
+tickle (Handle _ st) = liftEff $ writeRef st Active
 
 cancel :: forall eff. Handle (WaiEffects eff) -> Aff (WaiEffects eff) Unit
-cancel (Handle act st) = atomically do
-  _ <- writeTVar act (pure unit)
-  writeTVar st Canceled
+cancel (Handle act st) = liftEff do
+  _ <- writeRef act (pure unit)
+  writeRef st Canceled
 
 pause :: forall eff. Handle (WaiEffects eff) -> Aff (WaiEffects eff) Unit
-pause (Handle _ st) = atomically $ writeTVar st Paused
+pause (Handle _ st) = liftEff $ writeRef st Paused
 
 resume :: forall eff. Handle (WaiEffects eff) -> Aff (WaiEffects eff) Unit
 resume = tickle
 
 withManager :: forall eff a. Number -> (Manager (WaiEffects eff) -> Aff (WaiEffects eff) a) -> Aff (WaiEffects eff) a
 withManager timeout f = initialize timeout >>= f
+
+mkCatListAction
+  :: forall eff item item'
+   . (item -> Aff eff (Maybe item'))
+  -> CatList item
+  -> Aff eff (CatList item' -> CatList item')
+mkCatListAction f old = do
+  new <- map (mapMaybeM id) $ traverse f old
+  pure $ append new
+
+mapMaybeM :: forall a a'. (a -> Maybe a') -> CatList a -> CatList a'
+mapMaybeM p xs = foldl select empty xs
+  where
+  select cq i = case p i of
+    Nothing -> cq
+    Just x  -> snoc cq x

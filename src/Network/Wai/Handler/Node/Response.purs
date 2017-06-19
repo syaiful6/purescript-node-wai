@@ -11,10 +11,12 @@ import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Error.Class (throwError, try)
 import Control.Monad.Eff.Exception (error)
 
+import Data.ArrayBuffer.TypedArray (plusPtr)
 import Data.ByteString as B
 import Data.ByteString.Builder (Builder, string7)
+import Data.ByteString.Builder.Internal as BI
 import Data.ByteString.Builder.Extra
-  (runBuilder, newByteStringBuilderRecv, allNewBuffersStrategy, refinedEff, flush, Next(..))
+  (runBuilder, newByteStringBuilderRecv, reuseBufferStrategy, refinedEff, flush, Next(..))
 import Data.Either (Either(..))
 import Data.Function (on)
 import Data.Maybe (Maybe(..), maybe)
@@ -32,6 +34,7 @@ import Network.Wai.Handler.Node.Header (IndexedHeader)
 import Network.Wai.Handler.Node.Types as Z
 import Network.Wai.Handler.Node.Timeout as T
 import Network.Wai.Handler.Node.File (RspFileInfo(..), conditionalRequest, addContentHeadersForFilePart)
+import Network.Wai.Handler.Node.Utils (nextTick)
 
 sendResponse
   :: forall eff
@@ -99,7 +102,9 @@ sendRsp conn _ ver s hs (RspBuilder builder) = do
   toBufIOWith buffer size (Z.connSendAll conn) builder
   pure (Tuple (Just s) Nothing)
 sendRsp conn _ ver s hs (RspStream streamingBody th) = do
-  Tuple recv finish <- liftEff $ refinedEff $ newByteStringBuilderRecv (allNewBuffersStrategy 16384)
+  Tuple recv finish <- liftEff $ refinedEff $
+                    newByteStringBuilderRecv $ reuseBufferStrategy $
+                    pure $ toBuilderBuffer (Z.connWriteBuffer conn) (Z.connBufferSize conn)
   _ <- Z.connWriteHead conn s hs
   let
     send builder = do
@@ -109,7 +114,7 @@ sendRsp conn _ ver s hs (RspStream streamingBody th) = do
           bs <- liftEff $ refinedEff $ popper
           unless (B.null bs) $ do
             _ <- sendFragment conn th bs
-            _ <- delay (wrap 0.00)
+            _ <- nextTick
             go
       go
   _ <- streamingBody send (send flush)
@@ -221,6 +226,9 @@ toBufIOWith buf size io builder = go firstWriter
 
 bufferIO :: forall eff. Z.Buffer -> Int -> (B.ByteString -> Aff eff Unit) -> Aff eff Unit
 bufferIO ptr siz io = io $ B.ByteString ptr 0 siz
+
+toBuilderBuffer :: Z.Buffer -> Z.BufSize -> BI.Buffer
+toBuilderBuffer ptr size = BI.Buffer ptr (BI.BufferRange ptr (ptr `plusPtr` size))
 
 replaceHeader :: H.HeaderName -> String -> H.ResponseHeaders -> H.ResponseHeaders
 replaceHeader k v hdrs = (Tuple k v : Nil) <> deleteBy ((==) `on` fst) (Tuple k v) hdrs

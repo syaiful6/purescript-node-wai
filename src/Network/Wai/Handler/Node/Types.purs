@@ -8,6 +8,7 @@ module Network.Wai.Handler.Node.Types
   , SendFile
   , Settings(..)
   , settingsLogger
+  , defaultSettings
   , Connection(..)
   , connSendMany
   , connSendAll
@@ -16,6 +17,7 @@ module Network.Wai.Handler.Node.Types
   , connClose
   , connWriteBuffer
   , connBufferSize
+  , connRecv
   , InternalInfo0(..)
   , timeoutManager0
   , InternalInfo(..)
@@ -30,16 +32,18 @@ import Prelude
 
 import Control.Monad.Aff (Aff)
 import Control.Monad.Eff (Eff)
+import Control.Monad.Eff.Console (CONSOLE, logShow)
 import Control.Monad.Eff.Ref (Ref)
 import Control.Monad.Eff.Exception (Error)
 
 import Data.ArrayBuffer.TypedArray (Ptr, Uint8)
 import Data.ByteString (ByteString)
-import Data.List (List)
-import Data.Maybe (Maybe)
-import Data.Tuple (Tuple)
+import Data.ByteString.Builder (string7)
+import Data.List (List(Nil), (:))
+import Data.Maybe (Maybe(Nothing))
+import Data.Tuple (Tuple(..))
 
-import Network.Wai (Request)
+import Network.Wai (responseBuilder, Request, Response)
 import Network.Wai.Handler.Node.FdCache as F
 import Network.Wai.Handler.Node.FileInfoCache as I
 import Network.Wai.Handler.Node.Timeout as T
@@ -72,6 +76,7 @@ newtype Connection eff = Connection
   , connSendFile    :: SendFile eff
   , connClose       :: Aff eff Unit
   , connWriteHead   :: H.Status -> List H.Header -> Aff eff Unit
+  , connRecv        :: Recv eff
   , connWriteBuffer :: Buffer
   , connBufferSize  :: BufSize
   }
@@ -96,6 +101,9 @@ connWriteBuffer (Connection r) = r.connWriteBuffer
 
 connBufferSize :: forall eff. Connection eff -> BufSize
 connBufferSize (Connection r) = r.connBufferSize
+
+connRecv :: forall eff. Connection eff -> Recv eff
+connRecv (Connection r) = r.connRecv
 
 data InternalInfo0 eff =
   InternalInfo0
@@ -135,8 +143,35 @@ newtype Settings eff = Settings
   , fileInfoCacheDuration :: Number
   , logger                :: Request eff -> H.Status -> Maybe Int -> Aff eff Unit
   , onException           :: Maybe (Request eff) -> Error -> Eff eff Unit
+  , onExceptionResponse   :: Error -> Response eff
   , slowlorisSize         :: Int
+  }
+
+defaultSettings :: forall eff. Settings (console :: CONSOLE | eff)
+defaultSettings = Settings
+  { socketOption: SockTCP "127.0.0.1" 3000 Nothing
+  , timeout: 30.00
+  , manager: Nothing
+  , fdCacheDuration: 0.00
+  , fileInfoCacheDuration: 0.00
+  , logger: \_ _ _ -> pure unit
+  , onException: defaultOnException
+  , onExceptionResponse: defaultOnExceptionResponse
+  , slowlorisSize: 2048
   }
 
 settingsLogger :: forall eff. Settings eff -> Request eff -> H.Status -> Maybe Int -> Aff eff Unit
 settingsLogger (Settings { logger }) = logger
+
+defaultOnExceptionResponse :: forall eff. Error -> Response eff
+defaultOnExceptionResponse _ = responseBuilder
+  H.internalServerError500
+  ((Tuple H.hContentType "text/plain; charset=utf-8") : Nil)
+  (string7 "Something went wrong")
+
+defaultOnException
+  :: forall eff
+   . Maybe (Request (console :: CONSOLE | eff))
+  -> Error
+  -> Eff (console :: CONSOLE | eff) Unit
+defaultOnException _ e = logShow e

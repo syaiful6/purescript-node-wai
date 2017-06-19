@@ -64,7 +64,7 @@ flushBody src = go
     if B.null bs
       then pure unit
       else do
-        delay (wrap 100.00)
+        delay (wrap 0.00)
         go
 
 readBody

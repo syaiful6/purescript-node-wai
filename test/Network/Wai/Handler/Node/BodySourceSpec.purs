@@ -6,7 +6,7 @@ import Prelude
 
 import Control.Monad.Aff (delay)
 import Control.Monad.Eff.Class (liftEff)
-import Control.Monad.Eff.Console (CONSOLE, log)
+import Control.Monad.Eff.Console (log)
 import Control.Monad.Eff.Random (RANDOM)
 
 import Data.ByteString as B
@@ -20,7 +20,7 @@ import Network.Wai.Handler.Node.BodySource (readBody, mkBodySource')
 
 import Node.FS.Stream (createReadStream)
 
-type TestEff eff = WaiEffects (console :: CONSOLE, random :: RANDOM | eff)
+type TestEff eff = WaiEffects (random :: RANDOM | eff)
 
 goDrain recv = do
   buf <- recv
