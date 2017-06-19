@@ -37,7 +37,7 @@ recvBody (BodySource _ queue) EOF = S.writeTQueue queue EOF $> true
 recvBody (BodySource size queue) er@(Entry bs) = do
   size' <- S.readTVar size
   let i = size' - (B.length bs)
-  _ <- S.writeTVar size rem
+  _ <- S.writeTVar size i
   _ <- S.writeTQueue queue er
   pure $ if i <= 0 then true else false
 
@@ -78,7 +78,7 @@ readBody s bso = do
   started <- liftEff $ newRef false
   pure $ do
     isStarted <- liftEff $ readRef started
-    isFull <- S.atomically $ isBodySourceFull bsp
+    isFull <- S.atomically $ isBodySourceFull bso
     when (not isStarted && not isFull) $ liftEff $ start started errorRef
     recvB errorRef eof
   where

@@ -1,6 +1,7 @@
 module Network.Wai.Types.Status
   ( Status(..)
   , mkStatus
+  , statusNumber
   , status100
   , continue100
   , status101
@@ -114,6 +115,9 @@ instance ordStatus :: Ord Status where
 
 mkStatus :: Int -> String -> Status
 mkStatus = Status
+
+statusNumber :: Status -> Int
+statusNumber (Status n _) = n
 
 -- | Continue 100
 status100 :: Status

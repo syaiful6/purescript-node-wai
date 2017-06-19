@@ -7,13 +7,22 @@ module Network.Wai.Handler.Node.Types
   , FileId(..)
   , SendFile
   , Settings(..)
+  , settingsLogger
   , Connection(..)
   , connSendMany
   , connSendAll
   , connSendFile
   , connWriteHead
   , connClose
+  , connWriteBuffer
+  , connBufferSize
   , InternalInfo0(..)
+  , timeoutManager0
+  , InternalInfo(..)
+  , toInternalInfo
+  , getFileInfo
+  , getFd
+  , timeoutHandle
   , SocketOption(..)
   ) where
 
@@ -24,7 +33,7 @@ import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Ref (Ref)
 import Control.Monad.Eff.Exception (Error)
 
-import Data.ArrayBuffer.TypedArray (Ptr, Uint8, arrayBuffer)
+import Data.ArrayBuffer.TypedArray (Ptr, Uint8)
 import Data.ByteString (ByteString)
 import Data.List (List)
 import Data.Maybe (Maybe)
@@ -82,11 +91,20 @@ connWriteHead (Connection r) = r.connWriteHead
 connClose :: forall eff. Connection eff -> Aff eff Unit
 connClose (Connection r) = r.connClose
 
+connWriteBuffer :: forall eff. Connection eff -> Buffer
+connWriteBuffer (Connection r) = r.connWriteBuffer
+
+connBufferSize :: forall eff. Connection eff -> BufSize
+connBufferSize (Connection r) = r.connBufferSize
+
 data InternalInfo0 eff =
   InternalInfo0
     (T.Manager eff)
     (FilePath -> Aff eff (Tuple (Maybe F.Fd) (F.Refresh eff)))
     (FilePath -> Aff eff I.FileInfo)
+
+timeoutManager0 :: forall eff. InternalInfo0 eff -> T.Manager eff
+timeoutManager0 (InternalInfo0 m _ _) = m
 
 data InternalInfo eff =
   InternalInfo
@@ -94,6 +112,18 @@ data InternalInfo eff =
     (T.Manager eff)
     (FilePath -> Aff eff (Tuple (Maybe F.Fd) (F.Refresh eff)))
     (FilePath -> Aff eff I.FileInfo)
+
+toInternalInfo :: forall eff. T.Handle eff -> InternalInfo0 eff -> InternalInfo eff
+toInternalInfo h (InternalInfo0 m f g) = InternalInfo h m f g
+
+timeoutHandle :: forall eff. InternalInfo eff -> T.Handle eff
+timeoutHandle (InternalInfo h _ _ _) = h
+
+getFileInfo :: forall eff. InternalInfo eff -> FilePath -> Aff eff I.FileInfo
+getFileInfo (InternalInfo _ _ _ gt) = gt
+
+getFd :: forall eff. InternalInfo eff -> FilePath -> Aff eff (Tuple (Maybe F.Fd) (F.Refresh eff))
+getFd (InternalInfo _ _ ft _) = ft
 
 data SocketOption = SockTCP String Int (Maybe Int) | SockUnix String
 
@@ -105,4 +135,8 @@ newtype Settings eff = Settings
   , fileInfoCacheDuration :: Number
   , logger                :: Request eff -> H.Status -> Maybe Int -> Aff eff Unit
   , onException           :: Maybe (Request eff) -> Error -> Eff eff Unit
+  , slowlorisSize         :: Int
   }
+
+settingsLogger :: forall eff. Settings eff -> Request eff -> H.Status -> Maybe Int -> Aff eff Unit
+settingsLogger (Settings { logger }) = logger

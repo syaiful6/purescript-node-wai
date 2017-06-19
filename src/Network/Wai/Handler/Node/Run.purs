@@ -2,9 +2,11 @@ module Network.Wai.Handler.Node.Run where
 
 import Prelude
 
+import Control.Alt ((<|>))
+import Control.Monad.Aff (Aff, makeAff, runAff, forkAff, Canceler, nonCanceler)
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
-import Control.Monad.Aff (Aff, makeAff)
+import Control.Monad.Eff.Ref as Ref
 import Control.Monad.Error.Class (withResource)
 
 import Data.ArrayBuffer (allocArrayBuffer)
@@ -13,11 +15,13 @@ import Data.Bifunctor (lmap)
 import Data.ByteString.Node.Stream as BS
 import Data.ByteString.Node.File as NF
 import Data.Foldable (traverse_)
+import Data.Function.Uncurried (Fn2, runFn2)
 import Data.List (List(Nil))
 import Data.String as S
 import Data.String.CaseInsensitive (CaseInsensitiveString(..))
 import Data.Maybe (Maybe(..), fromMaybe)
 import Data.StrMap as SM
+import Data.Posix.Signal (Signal(SIGTERM, SIGINT))
 import Data.Tuple (Tuple, uncurry)
 
 import Network.Wai (Application, Request(..))
@@ -28,12 +32,12 @@ import Network.Wai.Handler.Node.Types as Z
 import Network.Wai.Handler.Node.FdCache as F
 import Network.Wai.Handler.Node.FileInfoCache as I
 import Network.Wai.Handler.Node.Timeout as T
-import Network.Wai.Handler.Node.Utils (handleAff)
 
 import Node.HTTP as N
 import Node.FS (FileDescriptor)
 import Node.FS.Stream (defaultReadStreamOptions, createReadStream, fdCreateReadStream)
 import Node.Path (FilePath)
+import Node.Process as Proc
 import Unsafe.Coerce (unsafeCoerce)
 
 
@@ -107,22 +111,56 @@ runServer
   -> Application (WaiEffects eff)
   -> Z.InternalInfo0 (WaiEffects eff)
   -> Aff (WaiEffects eff) Unit
-runServer sett@(Z.Settings set) app ii0 = do
-  serv <- liftEff $ N.createServer (\req res -> handleAff $ handleRequest req res)
-  _ <- liftEff $ connect serv (pure unit)
-  pure unit
+runServer sett@(Z.Settings set) app ii0 =
+  withResource
+    (liftEff (N.createServer handleRequest))
+    shutdownServer
+    (\serv -> connect serv *> trapSignal)
   where
-  connect serv eff = case set.socketOption of
+  connect serv = makeAff \_ succ -> case set.socketOption of
     Z.SockTCP hostname port backlog ->
-      N.listen serv {hostname, port, backlog } eff
+      N.listen serv { hostname, port, backlog } (succ unit)
     Z.SockUnix pathname ->
-      N.listenSocket serv pathname eff
+      N.listenSocket serv pathname (succ unit)
 
-  handleRequest :: N.Request -> N.Response -> Aff (WaiEffects eff) Unit
-  handleRequest req res = do
-    conn <- liftEff $ httpConnection res
+  handleRequest :: N.Request -> N.Response -> Eff (WaiEffects eff) Unit
+  handleRequest req res = void $
+    runAff
+      (set.onException Nothing)
+      (const (pure unit))
+      (handleRequest' req res)
+
+  handleRequest' :: N.Request -> N.Response -> Aff (WaiEffects eff) Unit
+  handleRequest' req res = do
     wreq <- recvNodeRequest req
-    pure unit
+    void $ forkAff $ withClosedRef \ref ->
+      withResource
+        (liftEff (httpConnection res))
+        (cleanup ref)
+        (serve ref wreq)
+    where
+    serve ref wreq conn = withResource register cancel \th ->
+      let ii1 = Z.toInternalInfo th ii0
+      in serveConnection wreq conn ii1 sett app
+      where
+      register = T.register (Z.timeoutManager0 ii0) (cleanup ref conn)
+      cancel   = T.tickle
+
+    cleanup ref conn = do
+      isClosed <- liftEff $ Ref.modifyRef' ref (\x -> { state: true, value: x })
+      unless isClosed $ Z.connClose conn
+
+    withClosedRef inner = liftEff (Ref.newRef false) >>= inner
+
+serveConnection
+  :: forall eff
+   . Request (WaiEffects eff)
+  -> Z.Connection (WaiEffects eff)
+  -> Z.InternalInfo (WaiEffects eff)
+  -> Z.Settings (WaiEffects eff)
+  -> Application (WaiEffects eff)
+  -> Aff (WaiEffects eff) Unit
+serveConnection req conn ii set app = pure unit
 
 nodeHttpWriteHead :: forall e. N.Response -> H.Status -> H.ResponseHeaders -> Eff (http :: N.HTTP | e) Unit
 nodeHttpWriteHead nresp (H.Status co reas) hdrs = do
@@ -186,7 +224,21 @@ pipeStreamAff r w = makeAff \err suc -> do
   BS.onError r err
   BS.onEnd r do
     suc unit
-  pipeNoEnd r w $> unit
+  runFn2 pipeNoEnd r w $> unit
+
+shutdownServer :: forall eff. N.Server -> Aff (WaiEffects eff) Unit
+shutdownServer serv = do
+  _ <- runFn2 closeHttpServer nonCanceler serv
+  liftEff $ Proc.exit 0
+
+trapSignal :: forall eff. Aff (WaiEffects eff) Unit
+trapSignal = sigterm <|> sigint
+  where
+  sigterm = makeAff \_ succ -> Proc.onSignal SIGTERM (succ unit)
+  sigint  = makeAff \_ succ -> Proc.onSignal SIGINT (succ unit)
 
 foreign import pipeNoEnd
-  :: forall r w eff. BS.Readable w eff -> BS.Writable r eff -> Eff eff Unit
+  :: forall r w eff. Fn2 (BS.Readable w eff) (BS.Writable r eff) (Eff eff Unit)
+
+foreign import closeHttpServer
+  :: forall eff. Fn2 (Canceler eff) N.Server (Aff (http :: N.HTTP | eff) Unit)

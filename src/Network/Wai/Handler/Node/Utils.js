@@ -1,1 +1,3 @@
-exports._process = process
+"use strict";
+
+exports._process = process;
