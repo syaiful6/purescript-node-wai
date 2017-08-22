@@ -3,7 +3,6 @@ module Network.Wai.Handler.Node.BodySource where
 import Prelude
 
 import Control.Monad.Aff (Aff, delay)
-import Control.Monad.Aff.AVar as AV
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Ref (newRef, writeRef, readRef)
