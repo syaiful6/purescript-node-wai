@@ -7,8 +7,8 @@
     "output"
   ],
   "dependencies": {
-    "purescript-aff": "^3.0.0",
-    "purescript-aff-sched": "git://github.com/syaiful6/purescript-aff-sched.git#9f591c7",
+    "purescript-aff": "^4.0.0",
+    "purescript-aff-sched": "git://github.com/syaiful6/purescript-aff-sched.git#d67d19a146fd65ab1ddd8b4bc9af3379a1027134",
     "purescript-arrays": "^4.0.1",
     "purescript-control": "^3.0.0",
     "purescript-datetime": "^3.0.0",
@@ -23,7 +23,7 @@
     "purescript-lists": "^4.1.0",
     "purescript-maps": "^3.3.1",
     "purescript-maybe": "^3.0.0",
-    "purescript-node-fs-aff": "^4.0.0",
+    "purescript-node-fs-aff": "^5.0.0",
     "purescript-node-http": "^4.0.0",
     "purescript-node-process": "^4.0.0",
     "purescript-node-strex": "git://github.com/julienchan/purescript-node-strex.git#a8c1dd03c471d634b1b867d2b7361cf52e09de1b",
@@ -31,11 +31,11 @@
     "purescript-string-parsers": "^3.0.0",
     "purescript-transformers": "^3.2.0",
     "purescript-unfoldable": "^3.0.0",
-    "purescript-stm": "git://github.com/syaiful6/purescript-stm.git#f5fc55c8f67a7805271b04271c38f7f648b66d4d",
+    "purescript-stm": "git://github.com/syaiful6/purescript-stm.git#v0.1",
     "purescript-strex": "git://github.com/julienchan/purescript-strex.git#d382508add7b38611514a2e7ac5f46c337efea32"
   },
   "devDependencies": {
-    "purescript-test-unit": "^11.0.0",
+    "purescript-test-unit": "^13.0.0",
     "purescript-quickcheck": "^4.0.0",
     "purescript-psci-support": "^3.0.0"
   }

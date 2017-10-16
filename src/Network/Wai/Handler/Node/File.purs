@@ -6,8 +6,6 @@ module Network.Wai.Handler.Node.File
 
 import Prelude
 
-import Control.Alt ((<|>))
-
 import Data.Enum (fromEnum)
 import Data.Maybe (Maybe(..), fromMaybe)
 import Data.IntMap as IM
@@ -18,9 +16,9 @@ import Network.Wai (FilePart(..))
 import Network.Wai.Types as H
 import Network.Wai.Types.Header (parseByteRanges)
 import Network.Wai.Types.Date (HTTPDate, parseHTTPDate)
-import Network.Wai.Handler.Node.Header (RequestHeaderKey(..))
+import Network.Wai.Handler.Node.Header (RequestHeaderKey(..), IndexedHeader)
 import Network.Wai.Handler.Node.FileInfoCache as I
-import Network.Wai.Handler.Node.Header (IndexedHeader)
+
 
 data RspFileInfo
   = WithoutBody H.Status
@@ -38,9 +36,9 @@ conditionalRequest (I.FileInfo finfo) hs0 hm = case condition of
     -- manually check, to avoid unnecessary evaluation
     mcondition = case ifmodified hm finfo.size finfo.time of
       ifm@Just _ -> ifm
-      Nothing -> case ifunmodified hm finfo.size finfo.time of
+      Nothing    -> case ifunmodified hm finfo.size finfo.time of
         ifun@Just _  -> ifun
-        Nothing -> ifrange hm finfo.size finfo.time
+        Nothing      -> ifrange hm finfo.size finfo.time
     condition = fromMaybe (unconditional hm finfo.size) mcondition
 
 ifModifiedSince :: IndexedHeader -> Maybe HTTPDate
@@ -70,7 +68,7 @@ ifrange hm size mtime = do
 
 unconditional :: IndexedHeader -> Int -> RspFileInfo
 unconditional hm size = case IM.lookup (fromEnum ReqRange) hm of
-  Nothing -> WithBody H.status200 Nil 0 size
+  Nothing  -> WithBody H.status200 Nil 0 size
   Just rng -> parseRange rng size
 
 parseRange :: String -> Int -> RspFileInfo

@@ -6,10 +6,10 @@ module Network.Wai.Handler.Node.FileInfoCache
 
 import Prelude
 
-import Control.Monad.Aff (Aff)
-import Control.Monad.Aff.Schedule.Reaper
-  (Reaper, mkReaper, ReaperSetting(..), reaperRead, reaperAdd, reaperStop)
-import Control.Monad.Error.Class (throwError, catchError, withResource)
+import Control.Monad.Aff (Aff, bracket)
+import Control.Monad.Aff.Schedule.Reaper (Reaper, mkReaper, ReaperSetting(..)
+                                         ,reaperRead, reaperAdd, reaperStop)
+import Control.Monad.Error.Class (throwError, catchError)
 import Control.Monad.Eff.Exception (error)
 
 import Data.Map as M
@@ -47,7 +47,7 @@ type Cache = M.Map FilePath Entry
 
 type FileInfoCache eff = Reaper eff Cache (Tuple FilePath Entry)
 
-getInfo :: forall eff. FilePath -> Aff (WaiEffects eff) FileInfo
+getInfo :: forall eff. FilePath -> Aff (fs :: F.FS | eff) FileInfo
 getInfo fp = do
   fs <- F.stat fp
   if isFile fs
@@ -60,7 +60,11 @@ getInfo fp = do
 fileSizeInfo :: Stats -> Int
 fileSizeInfo (Stats s) = unsafePartial $ fromJust (fromNumber s.size)
 
-getAndRegisterInfo :: forall eff. FileInfoCache (WaiEffects eff) -> FilePath -> Aff (WaiEffects eff) FileInfo
+getAndRegisterInfo
+  :: forall eff
+   . FileInfoCache (fs :: F.FS | eff)
+  -> FilePath
+  -> Aff (fs :: F.FS | eff) FileInfo
 getAndRegisterInfo fic path = do
   cache <- reaperRead fic
   case M.lookup path cache of
@@ -68,13 +72,17 @@ getAndRegisterInfo fic path = do
     Just (Positive fi) -> pure fi
     Nothing            -> positive fic path `catchError` \_ -> negative fic path
 
-positive :: forall eff. FileInfoCache (WaiEffects eff) -> FilePath -> Aff (WaiEffects eff) FileInfo
+positive
+  :: forall eff
+   . FileInfoCache (fs :: F.FS | eff)
+  -> FilePath
+  -> Aff (fs :: F.FS | eff) FileInfo
 positive fic path = do
   info <- getInfo path
   _ <- reaperAdd fic (Tuple path (Positive info))
   pure info
 
-negative :: forall eff. FileInfoCache (WaiEffects eff) -> FilePath -> Aff (WaiEffects eff) FileInfo
+negative :: forall eff. FileInfoCache eff -> FilePath -> Aff eff FileInfo
 negative fic path = do
   _ <- reaperAdd fic (Tuple path Negative)
   throwError (error "FileInfoCache:negative")
@@ -85,7 +93,7 @@ withFileInfoCache
   -> ((FilePath -> Aff (WaiEffects eff) FileInfo) -> Aff (WaiEffects eff) a)
   -> Aff (WaiEffects eff) a
 withFileInfoCache 0.00 action = action getInfo
-withFileInfoCache dur action = withResource (initialize dur) terminate (action <<< getAndRegisterInfo)
+withFileInfoCache dur action  = bracket (initialize dur) terminate (action <<< getAndRegisterInfo)
 
 initialize :: forall eff. Number -> Aff (WaiEffects eff) (FileInfoCache (WaiEffects eff))
 initialize dur = mkReaper $ ReaperSetting
@@ -96,8 +104,8 @@ initialize dur = mkReaper $ ReaperSetting
   , empty: M.empty
   }
 
-override :: forall eff. Cache -> Aff (WaiEffects eff) (Cache -> Cache)
+override :: forall eff. Cache -> Aff eff (Cache -> Cache)
 override _ = pure $ const M.empty
 
-terminate :: forall eff. FileInfoCache (WaiEffects eff) -> Aff (WaiEffects eff) Unit
+terminate :: forall eff. FileInfoCache eff -> Aff eff Unit
 terminate x = void $ reaperStop x

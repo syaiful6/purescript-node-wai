@@ -20,7 +20,7 @@ import Control.Monad.Aff.Schedule.Reaper
   (Reaper, ReaperSetting(..), mkReaper, reaperAdd, reaperStop, reaperKill)
 import Control.Monad.Error.Class (catchError)
 import Control.Monad.Eff.Class (liftEff)
-import Control.Monad.Eff.Ref (Ref, newRef, writeRef, readRef)
+import Control.Monad.Eff.Ref (REF, Ref, newRef, writeRef, readRef)
 
 import Data.CatList (CatList, empty, cons, null, snoc)
 import Data.Foldable (traverse_, foldl)
@@ -67,21 +67,21 @@ initialize timeout = mkReaper $ ReaperSetting
   inactivate Active = Inactive
   inactivate x = x
 
-stopManager :: forall eff. Manager (WaiEffects eff) -> Aff (WaiEffects eff) Unit
+stopManager :: forall eff. Manager (ref :: REF | eff) -> Aff (ref :: REF | eff) Unit
 stopManager rep = reaperStop rep >>= traverse_ fire
   where
   fire (Handle act _) = do
     onTimeout <- liftEff (readRef act)
     onTimeout `catchError` \_ -> pure unit
 
-killManager :: forall eff. Manager (WaiEffects eff) -> Aff (WaiEffects eff) Unit
+killManager :: forall eff. Manager eff -> Aff eff Unit
 killManager = reaperKill
 
 register
   :: forall eff
-   . Manager (WaiEffects eff)
-  -> TimeoutAction (WaiEffects eff)
-  -> Aff (WaiEffects eff) (Handle (WaiEffects eff))
+   . Manager (ref :: REF | eff)
+  -> TimeoutAction (ref :: REF | eff)
+  -> Aff (ref :: REF | eff) (Handle (ref :: REF | eff))
 register mgr onTimeout = do
   act   <- liftEff $ newRef onTimeout
   state <- liftEff $ newRef Active
@@ -89,18 +89,18 @@ register mgr onTimeout = do
   _ <- reaperAdd mgr h
   pure h
 
-tickle :: forall eff. Handle (WaiEffects eff) -> Aff (WaiEffects eff) Unit
+tickle :: forall eff. Handle (ref :: REF | eff) -> Aff (ref :: REF | eff) Unit
 tickle (Handle _ st) = liftEff $ writeRef st Active
 
-cancel :: forall eff. Handle (WaiEffects eff) -> Aff (WaiEffects eff) Unit
+cancel :: forall eff. Handle (ref :: REF | eff) -> Aff (ref :: REF | eff) Unit
 cancel (Handle act st) = liftEff do
   _ <- writeRef act (pure unit)
   writeRef st Canceled
 
-pause :: forall eff. Handle (WaiEffects eff) -> Aff (WaiEffects eff) Unit
+pause :: forall eff. Handle (ref :: REF | eff) -> Aff (ref :: REF | eff) Unit
 pause (Handle _ st) = liftEff $ writeRef st Paused
 
-resume :: forall eff. Handle (WaiEffects eff) -> Aff (WaiEffects eff) Unit
+resume :: forall eff. Handle (ref :: REF | eff) -> Aff (ref :: REF | eff) Unit
 resume = tickle
 
 withManager :: forall eff a. Number -> (Manager (WaiEffects eff) -> Aff (WaiEffects eff) a) -> Aff (WaiEffects eff) a

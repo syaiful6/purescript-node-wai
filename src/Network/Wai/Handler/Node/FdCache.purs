@@ -8,11 +8,10 @@ module Network.Wai.Handler.Node.FdCache
 
 import Prelude
 
-import Control.Monad.Aff (Aff)
+import Control.Monad.Aff (Aff, bracket)
 import Control.Monad.Aff.Schedule.Reaper
   (Reaper, mkReaper, ReaperSetting(..), reaperRead, reaperAdd, reaperStop)
 import Control.Monad.Eff.Class (liftEff)
-import Control.Monad.Error.Class (withResource)
 import Control.Monad.Eff.Ref (REF, Ref, newRef, writeRef, readRef)
 
 import Data.Foldable (traverse_, foldr)
@@ -43,7 +42,7 @@ withFdCache
        -> Aff (WaiEffects eff) a)
   -> Aff (WaiEffects eff) a
 withFdCache 0.00 action = action getFdNothing
-withFdCache dur action = withResource (initialize dur) terminate (action <<< getFd)
+withFdCache dur action  = bracket (initialize dur) terminate (action <<< getFd)
 
 data Status = Active | Inactive
 
@@ -80,10 +79,10 @@ type FdCache = M.Map FilePath FdEntry
 
 newtype MutableFdCache eff = MutableFdCache (Reaper eff FdCache (Tuple FilePath FdEntry))
 
-fdCache :: forall eff. MutableFdCache (WaiEffects eff) -> Aff (WaiEffects eff) FdCache
+fdCache :: forall eff. MutableFdCache eff -> Aff eff FdCache
 fdCache (MutableFdCache reaper) = reaperRead reaper
 
-look :: forall eff. MutableFdCache (WaiEffects eff) -> FilePath -> Aff (WaiEffects eff) (Maybe FdEntry)
+look :: forall eff. MutableFdCache eff -> FilePath -> Aff eff (Maybe FdEntry)
 look mfc path = do
   v <- M.lookup path <$> fdCache mfc
   case v of
@@ -103,7 +102,7 @@ initialize dur = MutableFdCache <$> mkReaper settings
     , empty: M.empty
     }
 
-clean :: forall eff. FdCache -> Aff (WaiEffects eff) (FdCache -> FdCache)
+clean :: forall eff. FdCache -> Aff (fs :: FS, ref :: REF | eff) (FdCache -> FdCache)
 clean old = do
   new <- map (hfilterMap id) $ traverse prune old
   pure $ M.union new
@@ -113,7 +112,7 @@ clean old = do
     act Active   = inactive mst *> pure (Just st)
     act Inactive = F.fdClose fd *> pure Nothing
 
-terminate :: forall eff. MutableFdCache (WaiEffects eff) -> Aff (WaiEffects eff) Unit
+terminate :: forall eff. MutableFdCache (fs :: FS | eff) -> Aff (fs :: FS | eff) Unit
 terminate (MutableFdCache reaper) = do
     t <- reaperStop reaper
     traverse_ closeIt $ (M.toAscUnfoldable t :: List (Tuple FilePath FdEntry))
@@ -127,9 +126,9 @@ hfilterMap p xs = foldr select M.empty (M.toUnfoldable xs :: List (Tuple k v))
 
 getFd
   :: forall eff
-   . MutableFdCache (WaiEffects eff)
+   . MutableFdCache (fs :: FS, ref :: REF | eff)
   -> FilePath
-  -> Aff (WaiEffects eff) (Tuple (Maybe Fd) (Refresh (WaiEffects eff)))
+  -> Aff (fs :: FS, ref :: REF | eff) (Tuple (Maybe Fd) (Refresh (fs :: FS, ref :: REF | eff)))
 getFd mfc@(MutableFdCache reaper) path = look mfc path >>= get
   where
   get Nothing = do
