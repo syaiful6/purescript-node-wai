@@ -10,12 +10,12 @@ exports._receiveStream = function (left, right, stream, size, cb) {
           len += chunk.length
       }
       removeListener()
-      cb(right(Buffer.concat(data, len)))
+      cb(right(Buffer.concat(data, len)))()
     }
 
     function onError (err) {
       removeListener()
-      cb(left(err))
+      cb(left(err))()
     }
 
     function removeListener() {

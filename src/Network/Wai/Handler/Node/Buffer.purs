@@ -1,4 +1,13 @@
-module Network.Wai.Handler.Node.BufferPool where
+module Network.Wai.Handler.Node.BufferPool
+  ( bufferSize
+  , allocateBuffer
+  , mallocBS
+  , newBufferPool
+  , withBufferPool
+  , copy
+  , bufferAff
+  , toBuilderBuffer
+  ) where
 
 import Prelude
 
@@ -9,6 +18,7 @@ import Control.Monad.Eff.Ref (REF, newRef, writeRef, readRef)
 
 import Data.ByteString as B
 import Data.ByteString.Internal (ByteString(..), mallocByteString, newPtr, plusPtr, memcpy)
+import Data.ByteString.Builder.Internal as BI
 import Data.ByteString.Unsafe (unsafeDrop, unsafeTake)
 import Data.Tuple (Tuple(..))
 
@@ -61,3 +71,9 @@ copy :: forall eff. Buffer -> ByteString -> Eff eff Buffer
 copy ptr (ByteString p o l) = do
   _ <- memcpy ptr (p `plusPtr` o) l
   pure $ ptr `plusPtr` l
+
+bufferAff :: forall eff. Buffer -> Int -> (ByteString -> Aff eff Unit) -> Aff eff Unit
+bufferAff ptr siz io = io $ ByteString ptr 0 siz
+
+toBuilderBuffer :: Buffer -> BufSize -> BI.Buffer
+toBuilderBuffer ptr size = BI.Buffer ptr (BI.BufferRange ptr (ptr `plusPtr` size))

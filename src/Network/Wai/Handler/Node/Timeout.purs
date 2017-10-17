@@ -65,7 +65,7 @@ initialize timeout = mkReaper $ ReaperSetting
       _        -> pure $ Just m
 
   inactivate Active = Inactive
-  inactivate x = x
+  inactivate x      = x
 
 stopManager :: forall eff. Manager (ref :: REF | eff) -> Aff (ref :: REF | eff) Unit
 stopManager rep = reaperStop rep >>= traverse_ fire

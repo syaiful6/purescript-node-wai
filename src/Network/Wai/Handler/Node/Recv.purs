@@ -1,4 +1,9 @@
-module Network.Wai.Handler.Node.Recv where
+module Network.Wai.Handler.Node.Recv
+  ( receive
+  , receiveBuf
+  , makeReceiveN
+  , spell
+  ) where
 
 import Prelude
 
@@ -66,8 +71,8 @@ spell init0 siz0 recv recvBuf =
         full <- recvBuf ptr' (siz0 - len0)
         pure $
           if full
-          then { bs: bs, leftover: empty }
-          else { bs: empty, leftover: empty }
+            then { bs: bs, leftover: empty }
+            else { bs: empty, leftover: empty }
   where
     len0 = length init0
     loop bss siz = do
@@ -100,6 +105,23 @@ receive stream pool = withBufferPool pool \(Tuple buf size) -> do
       _ <- liftEff $ copy buf bs
       pure len
 
+receiveBuf
+  :: forall w eff
+   . Readable w (exception :: EXCEPTION, ref :: REF | eff)
+  -> RecvBuf (exception :: EXCEPTION, ref :: REF | eff)
+receiveBuf stream buf0 siz0 = go buf0 siz0
+  where
+  go _ 0 = pure true
+  go buf size = do
+    nbuf <- receiveStream stream size
+    let bs  = fromBuffer nbuf
+        len = length bs
+    if len == 0
+      then pure false
+      else do
+        buf' <- liftEff $ copy buf bs
+        go buf' (siz - n)
+
 receiveStream
   :: forall w eff
    . Readable w (exception :: EXCEPTION | eff)
@@ -110,11 +132,11 @@ receiveStream stream size = makeAff \k -> do
   pure (effCanceler c)
 
 foreign import _receiveStream
-  :: forall w a eff
+  :: forall w eff
    . Fn.Fn5
       (forall x y. x -> Either x y)
       (forall x y. y -> Either x y)
       (Readable w (exception :: EXCEPTION | eff))
       Int
-      (Either Error a -> Eff (exception :: EXCEPTION | eff) Unit)
+      (Either Error NB.Buffer -> Eff (exception :: EXCEPTION | eff) Unit)
       (Eff (exception :: EXCEPTION | eff) (Eff (exception :: EXCEPTION | eff) Unit))
