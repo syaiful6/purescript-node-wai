@@ -28,7 +28,7 @@ minBufferSize :: Int
 minBufferSize = 2048
 
 newBufferPool :: forall eff. Eff (ref :: REF | eff) BufferPool
-newBufferPool = newRef BS.empty
+newBufferPool = newRef B.empty
 
 mallocBS :: forall eff. Int -> Eff eff ByteString
 mallocBS size = do
@@ -58,6 +58,6 @@ withBufferPool pool f = do
   pure $ unsafeTake consumed buff
 
 copy :: forall eff. Buffer -> ByteString -> Eff eff Buffer
-copy buf (ByteString ptr o l) = do
-  _ <- memcpy buf (ptr `plusPtr` o) l
+copy ptr (ByteString p o l) = do
+  _ <- memcpy ptr (p `plusPtr` o) l
   pure $ ptr `plusPtr` l

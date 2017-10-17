@@ -19,7 +19,7 @@ import Network.Wai.Types.Header
   , ByteRange(..), renderByteRange, renderByteRanges, parseByteRanges)
 import Network.Wai.Types.Method (Method(..), string2HTTPMethod)
 import Network.Wai.Types.Status
-  ( Status(..), statusNumber, mkStatus, status100, continue100, status101, switchingProtocols101
+  ( Status(..), statusNumber, statusMessage, mkStatus, status100, continue100, status101, switchingProtocols101
   , status200, ok200, status201, created201, status202, accepted202, status203
   , nonAuthoritative203, status204, noContent204, status205, resetContent205, status206
   , partialContent206, status300, multipleChoices300, status301, movedPermanently301

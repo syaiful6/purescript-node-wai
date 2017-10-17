@@ -2,6 +2,7 @@ module Network.Wai.Types.Status
   ( Status(..)
   , mkStatus
   , statusNumber
+  , statusMessage
   , status100
   , continue100
   , status101
@@ -118,6 +119,9 @@ mkStatus = Status
 
 statusNumber :: Status -> Int
 statusNumber (Status n _) = n
+
+statusMessage :: Status -> String
+statusMessage (Status _ m) = m
 
 -- | Continue 100
 status100 :: Status
