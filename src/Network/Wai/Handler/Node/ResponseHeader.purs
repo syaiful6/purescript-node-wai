@@ -2,9 +2,8 @@ module Network.Wai.Handler.Node.ResponseHeader (composeHeader) where
 
 import Prelude
 
-import Control.Monad.Eff (Eff, whileE)
+import Control.Monad.Eff (Eff, forE)
 import Control.Monad.Rec.Class (Step(..), tailRecM2)
-import Control.Monad.ST (newSTRef, readSTRef, writeSTRef, runST)
 
 import Data.ArrayBuffer.Types (Uint8)
 import Data.Foldable (foldl)
@@ -76,18 +75,8 @@ copyCRLF ptr = do
   pure (ptr `plusPtr` 2)
 
 copyStrChar8 :: forall eff. Ptr Uint8 -> String -> Eff eff (Ptr Uint8)
-copyStrChar8 ptr msg = runST do
-  ix <- newSTRef 0
-  loop <- newSTRef true
-  whileE (readSTRef loop) do
-    i' <- readSTRef ix
-    _ <- pokeByteOff ptr i' (S.charCodeAt i' msg .&. 0xFF)
-    let ix' = i' + 1
-    unless (lenxs > ix') do
-      _ <- writeSTRef loop false
-      pure unit
-    _ <- writeSTRef ix ix'
-    pure unit
+copyStrChar8 ptr msg = do
+  _ <- forE 0 lenxs \i -> pokeByteOff ptr i (S.charCodeAt i msg .&. 0xFF)
   pure $ ptr `plusPtr` lenxs
   where
     lenxs = S.length msg
