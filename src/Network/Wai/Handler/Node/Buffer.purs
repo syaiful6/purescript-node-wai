@@ -1,4 +1,4 @@
-module Network.Wai.Handler.Node.BufferPool
+module Network.Wai.Handler.Node.Buffer
   ( bufferSize
   , allocateBuffer
   , mallocBS
@@ -17,7 +17,7 @@ import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Ref (REF, newRef, writeRef, readRef)
 
 import Data.ByteString as B
-import Data.ByteString.Internal (ByteString(..), mallocByteString, newPtr, plusPtr, memcpy)
+import Data.ByteString.Internal (ByteString(..), mallocByteString, plusPtr, memcpy)
 import Data.ByteString.Builder.Internal as BI
 import Data.ByteString.Unsafe (unsafeDrop, unsafeTake)
 import Data.Tuple (Tuple(..))

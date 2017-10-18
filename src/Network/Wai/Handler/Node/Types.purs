@@ -10,14 +10,6 @@ module Network.Wai.Handler.Node.Types
   , settingsLogger
   , defaultSettings
   , Connection(..)
-  , connSendMany
-  , connSendAll
-  , connSendFile
-  , connWriteHead
-  , connClose
-  , connWriteBuffer
-  , connBufferSize
-  , connRecv
   , InternalInfo0(..)
   , timeoutManager0
   , InternalInfo(..)
@@ -25,6 +17,12 @@ module Network.Wai.Handler.Node.Types
   , getFileInfo
   , getFd
   , timeoutHandle
+  , Source(..)
+  , mkSource
+  , readSource
+  , readSource'
+  , leftoverSource
+  , readLeftoverSource
   , SocketOption(..)
   ) where
 
@@ -32,12 +30,14 @@ import Prelude
 
 import Control.Monad.Aff (Aff)
 import Control.Monad.Eff (Eff)
+import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (CONSOLE, logShow)
-import Control.Monad.Eff.Ref (Ref)
+import Control.Monad.Eff.Ref (REF,Ref, newRef, readRef, writeRef)
 import Control.Monad.Eff.Exception (Error)
 
 import Data.ArrayBuffer.Types (Uint8)
 import Data.ByteString (ByteString)
+import Data.ByteString as B
 import Data.ByteString.Builder (string7)
 import Data.ByteString.Internal (Ptr)
 import Data.List (List(Nil), (:))
@@ -76,35 +76,11 @@ newtype Connection eff = Connection
   , connSendAll     :: ByteString -> Aff eff Unit
   , connSendFile    :: SendFile eff
   , connClose       :: Aff eff Unit
-  , connWriteHead   :: H.Status -> List H.Header -> Aff eff Unit
   , connRecv        :: Recv eff
+  , connRecvBuf     :: RecvBuf eff
   , connWriteBuffer :: Buffer
   , connBufferSize  :: BufSize
   }
-
-connSendMany :: forall eff. Connection eff -> List ByteString -> Aff eff Unit
-connSendMany (Connection r) = r.connSendMany
-
-connSendAll :: forall eff. Connection eff -> ByteString -> Aff eff Unit
-connSendAll (Connection r) = r.connSendAll
-
-connSendFile :: forall eff. Connection eff -> SendFile eff
-connSendFile (Connection r) = r.connSendFile
-
-connWriteHead :: forall eff. Connection eff -> H.Status -> List H.Header -> Aff eff Unit
-connWriteHead (Connection r) = r.connWriteHead
-
-connClose :: forall eff. Connection eff -> Aff eff Unit
-connClose (Connection r) = r.connClose
-
-connWriteBuffer :: forall eff. Connection eff -> Buffer
-connWriteBuffer (Connection r) = r.connWriteBuffer
-
-connBufferSize :: forall eff. Connection eff -> BufSize
-connBufferSize (Connection r) = r.connBufferSize
-
-connRecv :: forall eff. Connection eff -> Recv eff
-connRecv (Connection r) = r.connRecv
 
 data InternalInfo0 eff =
   InternalInfo0
@@ -133,6 +109,32 @@ getFileInfo (InternalInfo _ _ _ gt) = gt
 
 getFd :: forall eff. InternalInfo eff -> FilePath -> Aff eff (Tuple (Maybe F.Fd) (F.Refresh eff))
 getFd (InternalInfo _ _ ft _) = ft
+
+data Source eff = Source (Ref ByteString) (Aff eff ByteString)
+
+mkSource :: forall eff. Aff (ref :: REF | eff) ByteString -> Aff (ref :: REF | eff) (Source (ref :: REF | eff))
+mkSource aff = do
+  ref <- liftEff $ newRef B.empty
+  pure $ Source ref aff
+
+readSource :: forall eff. Source (ref :: REF | eff) -> Aff (ref :: REF | eff) ByteString
+readSource (Source ref aff) = do
+  bs <- liftEff $ readRef ref
+  if B.null bs
+    then aff
+    else do
+      _ <- liftEff $ writeRef ref B.empty
+      pure bs
+
+-- | Read from a Source, ignoring any leftovers.
+readSource' :: forall eff. Source (ref :: REF | eff) -> Aff (ref :: REF | eff) ByteString
+readSource' (Source _ aff) = aff
+
+leftoverSource :: forall eff. Source (ref :: REF | eff) -> ByteString -> Aff (ref :: REF | eff) Unit
+leftoverSource (Source ref _) bs = liftEff $ writeRef ref bs
+
+readLeftoverSource :: forall eff. Source (ref :: REF | eff) -> Aff (ref :: REF | eff) ByteString
+readLeftoverSource (Source ref _) = liftEff $ readRef ref
 
 data SocketOption = SockTCP String Int (Maybe Int) | SockUnix String
 

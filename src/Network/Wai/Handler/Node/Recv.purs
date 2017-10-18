@@ -24,7 +24,7 @@ import Data.Tuple (Tuple(..))
 import Node.Buffer as NB
 import Node.Stream (Readable)
 
-import Network.Wai.Handler.Node.BufferPool (mallocBS, copy, withBufferPool)
+import Network.Wai.Handler.Node.Buffer (mallocBS, copy, withBufferPool)
 import Network.Wai.Handler.Node.Types (BufferPool, Recv, RecvBuf, BufSize)
 
 
@@ -120,7 +120,7 @@ receiveBuf stream buf0 siz0 = go buf0 siz0
       then pure false
       else do
         buf' <- liftEff $ copy buf bs
-        go buf' (siz - n)
+        go buf' (size - len)
 
 receiveStream
   :: forall w eff
