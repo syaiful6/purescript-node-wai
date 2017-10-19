@@ -10,7 +10,9 @@ exports._writeRawHTTP = function (right, http, buf, cb) {
     } else {
       process.nextTick(cb(right()))
     }
-    http._headerSent = true
+    if (!http._headerSent) {
+      http._headerSent = true
+    }
   }
 }
 
@@ -39,6 +41,24 @@ exports._endRawHTTP = function (right, http, cb) {
   }
 }
 
-function getDateCurrent() {
+exports.getHttpSocket = function (resp) {
+  return function () {
+    return resp.connection
+  }
+}
+
+exports.getDateCurrent = function() {
   return new Date()
+}
+
+exports._closeHttpServer = function (left, right, server, cb) {
+  return function () {
+    server.close(function (err) {
+      if (err) {
+        cb(left(err))();
+      } else {
+        cb(right())();
+      }
+    });
+  }
 }

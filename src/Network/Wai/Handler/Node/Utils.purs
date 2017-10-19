@@ -5,6 +5,8 @@ module Network.Wai.Handler.Node.Utils
   , writeRawHTTP
   , endRawHTTP
   , getDateCurrent
+  , getHttpSocket
+  , closeHTTPServer
   ) where
 
 import Prelude
@@ -15,12 +17,13 @@ import Control.Monad.Eff (Eff)
 import Control.Monad.Error.Class (throwError, catchError)
 import Control.Monad.Eff.Exception (Error)
 
-import Data.Either (Either(Right))
+import Data.ByteString.Node.Stream (Writable)
+import Data.Either (Either(..))
 import Data.Monoid (mempty)
 import Data.Function.Uncurried as Fn
 import Data.JSDate (JSDate)
 
-import Node.HTTP (Response)
+import Node.HTTP (Response, Server)
 import Node.Buffer (Buffer)
 
 import Unsafe.Coerce (unsafeCoerce)
@@ -50,6 +53,11 @@ endRawHTTP res = makeAff \cb -> do
   _ <- Fn.runFn3 _endRawHTTP Right res cb
   pure mempty
 
+closeHTTPServer :: forall eff. Server -> Aff eff Unit
+closeHTTPServer server = makeAff \cb -> do
+  _ <- Fn.runFn4 _closeHttpServer Left Right server cb
+  pure mempty
+
 foreign import _process :: forall props. { | props }
 
 foreign import _writeRawHTTP
@@ -70,3 +78,14 @@ foreign import _endRawHTTP
       (Eff eff Unit)
 
 foreign import getDateCurrent :: forall eff. Eff eff JSDate
+
+foreign import getHttpSocket :: forall r eff. Response -> Eff eff (Writable r eff)
+
+foreign import _closeHttpServer
+  :: forall eff
+   . Fn.Fn4
+      (forall x y. x -> Either x y)
+      (forall x y. y -> Either x y)
+      Server
+      (Either Error Unit -> Eff eff Unit)
+      (Eff eff Unit)

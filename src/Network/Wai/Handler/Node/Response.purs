@@ -5,28 +5,39 @@ import Prelude
 import Control.Monad.Aff (Aff)
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
+import Control.Monad.Error.Class (try)
 
 import Data.Array as A
 import Data.ByteString as B
-import Data.ByteString.Builder (byteString, Builder)
+import Data.ByteString.Builder (Builder, byteString, string7)
+import Data.ByteString.Builder.Extra (refinedEff, flush, newByteStringBuilderRecv, reuseBufferStrategy)
+import Data.Either (Either(..))
 import Data.Enum (fromEnum)
 import Data.Maybe (Maybe(..), maybe)
 import Data.Foldable (intercalate)
 import Data.Function (on)
 import Data.IntMap as IM
 import Data.List (List(Nil), (:), deleteBy)
-import Data.Newtype (wrap)
 import Data.String as S
 import Data.Tuple (Tuple(..), fst)
+
+import Node.Path (FilePath)
 
 import Network.Wai (Request(..), Response(..), StreamingBody, responseStatus
                    ,responseHeaders, FilePart(..))
 import Network.Wai.Types as H
+import Network.Wai.Handler.Node.Buffer (chunkedTransferEncoding, chunkedTransferTerminator
+                                       ,toBufAffWith, toBuilderBuffer)
+import Network.Wai.Handler.Node.Date as D
+import Network.Wai.Handler.Node.File (RspFileInfo(..), conditionalRequest, addContentHeadersForFilePart)
 import Network.Wai.Handler.Node.Types as Z
 import Network.Wai.Handler.Node.Timeout as T
-import Network.Wai.Handler.Node.Header (IndexedHeader, indexResponseHeader)
+import Network.Wai.Handler.Node.Header (ResponseHeaderKey(..), RequestHeaderKey(..)
+                                       ,IndexedHeader, indexResponseHeader)
 import Network.Wai.Handler.Node.Effects (WaiEffects)
 import Network.Wai.Handler.Node.ResponseHeader (composeHeader)
+import Network.Wai.Handler.Node.Utils (nextTick)
+
 
 sendResponse
   :: forall eff
@@ -38,7 +49,7 @@ sendResponse
   -> Aff (WaiEffects eff) B.ByteString
   -> Response (WaiEffects eff)
   -> Aff (WaiEffects eff) Unit
-sendResponse settings conn ii request@(Request req) reqidxhdr src response =
+sendResponse settings conn ii request@(Request req) reqidxhdr src response = do
   hs <- addServerAndDate hs0
   if hasBody s
     then do
@@ -52,18 +63,18 @@ sendResponse settings conn ii request@(Request req) reqidxhdr src response =
       logger request s Nothing
       T.tickle th
   where
-    logger = settingsLogger settings
-    ver = httpVersion req
+    logger = Z.settingsLogger settings
+    ver = req.httpVersion
     s = responseStatus response
-    getdate = Z.getDate
+    getdate = Z.getDate ii
     addServerAndDate = addDate getdate rspidxhdr
     hs0 = sanitizeHeaders $ responseHeaders response
     rspidxhdr = indexResponseHeader hs0
     th     = Z.timeoutHandle ii
-    Tuple isPersist isChunked0 = infoFromRequest req reqidxhdr
+    Tuple isPersist isChunked0 = infoFromRequest request reqidxhdr
+    isHead    = req.method == H.HEAD
     isChunked = not isHead && isChunked0
-    Tuple isKeepAlive needsChunked = infoFromResponse rspidxhdr (isPersist,isChunked)
-    isHead = req.method == H.HEAD
+    Tuple isKeepAlive needsChunked = infoFromResponse rspidxhdr (Tuple isPersist isChunked)
     rsp    = case response of
       ResponseFile _ _ path mPart -> RspFile path mPart reqidxhdr isHead (T.tickle th)
       ResponseBuilder _ _ b
@@ -122,6 +133,72 @@ linesStr str = go xsc
   xsc = S.toCharArray str
   pred x = eq x '\n'
 
+sendRsp
+  :: forall eff
+   . Z.Connection (WaiEffects eff)
+  -> Z.InternalInfo (WaiEffects eff)
+  -> H.HttpVersion
+  -> H.Status
+  -> H.ResponseHeaders
+  -> Rsp (WaiEffects eff)
+  -> Aff (WaiEffects eff) (Tuple (Maybe H.Status) (Maybe Int))
+sendRsp (Z.Connection { connSendAll }) _ ver s hs RspNoBody = do
+  _ <- liftEff (composeHeader ver s hs) >>= connSendAll
+  pure (Tuple (Just s) Nothing)
+sendRsp (Z.Connection conn) _ ver s hs (RspBuilder body needsChunked) = do
+  header <- liftEff $ composeHeaderBuilder ver s hs needsChunked
+  let hdrBdy
+        | needsChunked = header <> chunkedTransferEncoding body
+                                <> chunkedTransferTerminator
+        | otherwise    = header <> body
+      buffer = conn.connWriteBuffer
+      size   = conn.connBufferSize
+  _ <- toBufAffWith buffer size (conn.connSendAll) hdrBdy
+  pure (Tuple (Just s) Nothing)
+sendRsp connect@(Z.Connection conn) _ ver s hs (RspStream streamingBody needsChunked th) = do
+  header <- liftEff $ composeHeaderBuilder ver s hs needsChunked
+  Tuple recv finish <- liftEff $ refinedEff $
+                    newByteStringBuilderRecv $ reuseBufferStrategy $
+                    pure $ toBuilderBuffer conn.connWriteBuffer (conn.connBufferSize)
+  let send builder = do
+        popper <- liftEff $ refinedEff $ recv builder
+        let go = do
+              bs <- liftEff $ refinedEff $ popper
+              unless (B.null bs) $ do
+                _ <- sendFragment connect th bs
+                nextTick
+                go
+        go
+      sendChunk
+        | needsChunked = send <<< chunkedTransferEncoding
+        | otherwise    = send
+  _ <- send header
+  _ <- streamingBody sendChunk (sendChunk flush)
+  when needsChunked $ send chunkedTransferTerminator
+  mbs <- liftEff $ refinedEff $ finish
+  _ <- maybe (pure unit) (sendFragment connect th) mbs
+  pure (Tuple (Just s) Nothing)
+sendRsp (Z.Connection { connSendAll }) _ _ _ _ (RspRaw withApp src tickle) = do
+  let
+    recv = do
+      bs <- src
+      unless (B.null bs) tickle
+      pure bs
+    send bs = connSendAll bs *> tickle
+  _ <- withApp recv send
+  pure (Tuple Nothing Nothing)
+sendRsp conn ii ver s0 hs0 (RspFile path (Just (part@FilePart { offset, byteCount })) _ isHead hook) =
+  sendRspFile2XX conn ii ver s0 hs path offset byteCount isHead hook
+  where
+  hs = addContentHeadersForFilePart hs0 part
+sendRsp conn ii ver _ hs0 (RspFile path Nothing idxhdr isHead hook) = do
+  efinfo <- try $ Z.getFileInfo ii path
+  case efinfo of
+    Left err    -> sendRspFile404 conn ii ver hs0
+    Right finfo -> case conditionalRequest finfo hs0 idxhdr of
+      WithoutBody s         -> sendRsp conn ii ver s hs0 RspNoBody
+      WithBody s hs beg len -> sendRspFile2XX conn ii ver s hs path beg len isHead hook
+
 sendRspFile2XX
   :: forall eff
    . Z.Connection (WaiEffects eff)
@@ -135,7 +212,7 @@ sendRspFile2XX
   -> Boolean
   -> Aff (WaiEffects eff) Unit
   -> Aff (WaiEffects eff) (Tuple (Maybe H.Status) (Maybe Int))
-sendRspFile2XX conn ii ver s hs path beg len isHead hook
+sendRspFile2XX conn@(Z.Connection { connSendAll, connSendFile }) ii ver s hs path beg len isHead hook
   | isHead    = sendRsp conn ii ver s hs RspNoBody
   | otherwise = do
       Tuple mfd fresher <- Z.getFd ii path
@@ -143,8 +220,8 @@ sendRspFile2XX conn ii ver s hs path beg len isHead hook
         fid   = Z.FileId { fileIdPath: path, fileIdFd: mfd }
         hook' = hook *> fresher
       bhs <- liftEff $ composeHeader ver s hs
-      _ <- Z.connSendAll conn bhs
-      _ <- Z.connSendFile conn fid beg len hook'
+      _ <- connSendAll bhs
+      _ <- connSendFile fid beg len hook'
       pure (Tuple (Just s) (Just len))
 
 sendRspFile404
@@ -154,31 +231,29 @@ sendRspFile404
   -> H.HttpVersion
   -> H.ResponseHeaders
   -> Aff (WaiEffects eff) (Tuple (Maybe H.Status) (Maybe Int))
-sendRspFile404 conn ii ver hs0 = sendRsp conn ii ver s hs (RspBuilder body)
+sendRspFile404 conn ii ver hs0 = sendRsp conn ii ver s hs (RspBuilder body true)
   where
   s    = H.notFound404
   hs   = replaceHeader H.hContentType "text/plain; charset=utf-8" hs0
   body = string7 "File not found"
 
 infoFromRequest :: forall eff. Request eff -> IndexedHeader -> Tuple Boolean Boolean
-infoFromRequest req reqidxhdr = (checkPersist req reqidxhdr, checkChunk req)
+infoFromRequest req reqidxhdr = Tuple (checkPersist req reqidxhdr) (checkChunk req)
 
 checkPersist :: forall eff. Request eff -> IndexedHeader -> Boolean
-checkPersist req reqidxhdr
-    | ver == H.http11 = checkPersist11 conn
-    | otherwise       = checkPersist10 conn
+checkPersist (Request { httpVersion }) reqidxhdr =
+  if httpVersion == H.http11 then checkPersist11 conn else checkPersist10 conn
   where
-    ver = httpVersion req
     conn = fromEnum ReqConnection `IM.lookup` reqidxhdr
     checkPersist11 (Just x)
-        | x == wrap "close"             = false
-    checkPersist11 _                    = true
+        | S.toLower x == "close"      = false
+    checkPersist11 _                  = true
     checkPersist10 (Just x)
-        | x == wrap "keep-alive"        = true
-    checkPersist10 _                    = false
+        | S.toLower x == "keep-alive" = true
+    checkPersist10 _                  = false
 
 checkChunk :: forall eff. Request eff -> Boolean
-checkChunk req = httpVersion req == H.http11
+checkChunk (Request { httpVersion }) = httpVersion == H.http11
 
 infoFromResponse :: IndexedHeader -> Tuple Boolean Boolean -> Tuple Boolean Boolean
 infoFromResponse rspidxhdr (Tuple isPersist isChunked) = Tuple isKeepAlive needsChunked
@@ -199,10 +274,10 @@ addTransferEncoding hdrs = (Tuple H.hTransferEncoding "chunked" : hdrs)
 
 addDate :: forall eff . Aff eff D.GMTDate -> IndexedHeader -> H.ResponseHeaders -> Aff eff H.ResponseHeaders
 addDate getdate rspidxhdr hdrs = case fromEnum ResDate `IM.lookup` rspidxhdr of
-    Nothing -> do
-        gmtdate <- getdate
-        pure $ Tuple H.hDate gmtdate : hdrs
-    Just _ -> pure hdrs
+  Nothing -> do
+    gmtdate <- getdate
+    pure $ Tuple H.hDate gmtdate : hdrs
+  Just _ -> pure hdrs
 
 sendFragment
   :: forall e

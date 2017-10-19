@@ -9,6 +9,9 @@ module Network.Wai.Handler.Node.Buffer
   , toBuilderBuffer
   , chunkedTransferEncoding
   , chunkedTransferTerminator
+  , toBufAffWith
+  , word32HexLength
+  , loopUntilZero
   ) where
 
 import Prelude
@@ -17,9 +20,12 @@ import Control.Monad.Aff (Aff)
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Ref (REF, newRef, writeRef, readRef)
+import Control.Monad.Error.Class (throwError)
+import Control.Monad.Eff.Exception (error)
 
 import Data.ByteString as B
 import Data.ByteString.Internal (ByteString(..), mallocByteString, plusPtr, minusPtr, memcpy, memcpyArr, poke)
+import Data.ByteString.Builder.Extra (runBuilder, refinedEff, Next(..))
 import Data.ByteString.Builder (string7)
 import Data.ByteString.Builder.Internal as BI
 import Data.ByteString.Unsafe (unsafeDrop, unsafeTake)
@@ -27,7 +33,7 @@ import Data.Int.Bits ((.&.), shr)
 import Data.Tuple (Tuple(..))
 
 import Network.Wai.Handler.Node.Types (Buffer, BufferPool, BufSize)
-
+import Network.Wai.Handler.Node.Utils (nextTick)
 
 bufferSize :: BufSize
 bufferSize = 16384
@@ -168,3 +174,30 @@ copyCRLF :: forall eff. Buffer -> Eff eff Buffer
 copyCRLF ptr = do
   _ <- memcpyArr ptr [13, 10]
   pure (ptr `plusPtr` 2)
+
+toBufAffWith
+  :: forall eff
+   . Buffer
+  -> BufSize
+  -> (ByteString -> Aff eff Unit)
+  -> BI.Builder
+  -> Aff eff Unit
+toBufAffWith buf size io builder = go firstWriter
+  where
+  firstWriter = runBuilder builder
+  runIO len   = bufferAff buf len io
+  go writer = do
+    Tuple len signal <- liftEff $ refinedEff $ writer buf size
+    case signal of
+      Done -> runIO len
+      More minSize next
+        | size < minSize -> throwError (error "toBufIOWith: BufferFull: minSize")
+        | otherwise      -> do
+            _ <- runIO len
+            _ <- nextTick
+            go next
+      Chunk bs next -> do
+        _ <- runIO len
+        _ <- io bs
+        _ <- nextTick
+        go next

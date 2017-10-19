@@ -20,7 +20,7 @@ import Network.Wai (Request(..))
 import Network.Wai.Types as H
 import Network.Wai.Handler.Node.Types as Z
 import Network.Wai.Handler.Node.Timeout as T
-import Network.Wai.Handler.Node.Header (IndexedHeader, indexRequestHeader, defaultIxReqHdrs)
+import Network.Wai.Handler.Node.Header (IndexedHeader, indexRequestHeader)
 import Network.Wai.Handler.Node.Effects (WaiEffects)
 
 

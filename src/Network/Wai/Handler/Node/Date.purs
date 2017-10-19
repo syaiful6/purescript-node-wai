@@ -8,21 +8,18 @@ import Prelude
 import Control.Monad.Aff (Aff)
 import Control.Monad.Aff.Schedule.AutoUpdate (UpdateSettings(..), mkAutoUpdate)
 import Control.Monad.Aff.Schedule.Effects (ScheduleEff)
+import Control.Monad.Eff.Class (liftEff)
 
-import Data.ByteString (pack, ByteString)
-import Data.String (toCharArray)
-import Data.Char (toCharCode)
-import Data.Int.Bits ((.&.))
 import Data.JSDate (JSDate, toUTCString)
 import Data.Newtype (wrap)
 
 import Network.Wai.Handler.Node.Utils (getDateCurrent)
 
 -- | The type of the Date header value.
-type GMTDate = ByteString
+type GMTDate = String
 
 withDateCache
-  :: forall eff
+  :: forall eff a
    . (Aff (ScheduleEff eff) GMTDate -> Aff (ScheduleEff eff) a)
   -> Aff (ScheduleEff eff) a
 withDateCache action = initialize >>= action
@@ -30,10 +27,7 @@ withDateCache action = initialize >>= action
 initialize
   :: forall eff
    . Aff (ScheduleEff eff) (Aff (ScheduleEff eff) GMTDate)
-initialize = mkAutoUpdate $ UpdateSettings (wrap 1000) (str2Bs <$> getCurrentHTTPDate)
+initialize = mkAutoUpdate $ UpdateSettings (wrap 1000.00) (toUTCString <$> getCurrentHTTPDate)
 
-getCurrentHTTPDate :: Aff eff JSDate
+getCurrentHTTPDate :: forall eff. Aff eff JSDate
 getCurrentHTTPDate = liftEff getDateCurrent
-
-str2Bs :: String -> ByteString
-str2Bs = pack <<< map (\c -> toCharCode c .&. 0xFF) <<< toCharArray

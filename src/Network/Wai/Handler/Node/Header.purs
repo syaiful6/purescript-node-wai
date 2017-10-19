@@ -1,6 +1,7 @@
 module Network.Wai.Handler.Node.Header
   ( IndexedHeader
   , RequestHeaderKey(..)
+  , ResponseHeaderKey(..)
   , indexRequestHeader
   , indexResponseHeader
   , defaultIxReqHdrs
@@ -124,10 +125,10 @@ requestKeyIndex bs = case S.length (unwrap bs) of
   17 -> if bs == wrap "transfer-encoding" then Just $ fromEnum ReqTransferEncoding else
        if bs == wrap "if-modified-since" then Just $ fromEnum ReqIfModifiedSince
        else Nothing
-  19 -> if bs == CaseInsensitiveString "if-unmodified-since" then Just $ fromEnum ReqIfUnmodifiedSince else Nothing
+  19 -> if bs == wrap "if-unmodified-since" then Just $ fromEnum ReqIfUnmodifiedSince else Nothing
   _  -> Nothing
 
-responseKeyIndex :: HeaderName -> Int
+responseKeyIndex :: HeaderName -> Maybe Int
 responseKeyIndex bs = case S.length (unwrap bs) of
     4  -> if bs == wrap "date" then Just $ fromEnum ResDate else Nothing
     6  -> if bs == wrap "server" then Just $ fromEnum ResServer else Nothing

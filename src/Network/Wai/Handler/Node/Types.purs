@@ -92,7 +92,7 @@ data InternalInfo0 eff =
     (FilePath -> Aff eff I.FileInfo)
 
 timeoutManager0 :: forall eff. InternalInfo0 eff -> T.Manager eff
-timeoutManager0 (InternalInfo0 m _ _) = m
+timeoutManager0 (InternalInfo0 m _ _ _) = m
 
 data InternalInfo eff =
   InternalInfo
