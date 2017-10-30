@@ -2,26 +2,14 @@
 
 exports._receiveStream = function () {
 
-  function readStart(socket) {
-    if (socket && !socket._paused && socket.readable)
-      socket.resume();
-  }
-
-  function readStop(socket) {
-    if (socket)
-      socket.pause();
-  }
-
   function onReadable(right, stream, state, size, cb) {
     var chunk = null;
-    while (null !== (chunk = stream.read(size - state.len)) && size > state.len) {
+    while (null !== (chunk = stream.read()) && size > state.len) {
       state.data.push(chunk);
       state.len += chunk.length;
     }
     if (state.len >= size && !state.resolved) {
       resolveRecv(right, stream, state, cb);
-      socket._paused = true;
-      readStop(socket);
     }
   }
 
@@ -57,13 +45,20 @@ exports._receiveStream = function () {
   }
 
   function onEnd(right, stream, state, cb) {
+    stream.__ended = true;
     if (!state.resolved) {
       resolveRecv(right, stream, state, cb)
     }
   }
 
+  function doNothing() {}
+
   return function (left, right, stream, size, cb) {
     return function () {
+      if (stream.__ended === true) {
+        cb(right(Buffer.allocUnsafe(0)))()
+        return doNothing;
+      }
       var state = {
         data: [],
         len: 0,
@@ -82,9 +77,6 @@ exports._receiveStream = function () {
       stream.on('end', state.onEnd);
 
       return cleanUpRecv.bind(state, stream);
-
-      socket._paused = false;
-      readStart(socket);
     };
   };
 }();

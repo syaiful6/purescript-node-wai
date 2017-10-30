@@ -32,7 +32,7 @@
     "purescript-transformers": "^3.2.0",
     "purescript-unfoldable": "^3.0.0",
     "purescript-stm": "git://github.com/syaiful6/purescript-stm.git#v0.1",
-    "purescript-strex": "git://github.com/julienchan/purescript-strex.git#d382508add7b38611514a2e7ac5f46c337efea32"
+    "purescript-strex": "git://github.com/julienchan/purescript-strex.git#834b7cb190944f922daa574a2f2a90db1d7ce381"
   },
   "devDependencies": {
     "purescript-test-unit": "^13.0.0",

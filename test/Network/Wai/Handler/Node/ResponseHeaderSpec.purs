@@ -1,4 +1,4 @@
-module Test.Test.Network.Wai.Handler.Node.ResponseHeader (mainResponseHeaderSpec) where
+module Test.Network.Wai.Handler.Node.ResponseHeader (mainResponseHeaderSpec) where
 
 import Prelude
 
